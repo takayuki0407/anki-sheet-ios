@@ -16,6 +16,7 @@ import { useApp } from "../store/session";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import { stagePdf } from "../engine/setupEngine";
 import { importBookmarks, importDeck } from "../db/repo";
+import { syncNewDeck } from "../sync/deck";
 import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "../types";
 import type { PdfDetectionResult } from "../engine/protocol";
 import { colors } from "../ui/theme";
@@ -132,6 +133,9 @@ export function ImportWizard() {
       });
       // Import the PDF's built-in outline (目次) as bookmarks, if it has one.
       if (result.outline.length) await importBookmarks(deckId, result.outline);
+      // Cloud sync (Pro): reserve the account-global slot + upload, in the background. Best-effort
+      // and fail-open — a sync hiccup (or being signed out) never blocks the local import.
+      void syncNewDeck(deckId, name.trim() || "無題", result.pageCount).catch(() => {});
       setView({ name: "viewer", deckId });
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : String(e));

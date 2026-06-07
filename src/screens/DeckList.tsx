@@ -20,6 +20,8 @@ import {
   setMeta,
 } from "../db/repo";
 import { exportBackup, importBackup } from "../db/backup";
+import { listBooks, unregisterBook, type AccountBook } from "../sync/api";
+import { deckBookId, downloadDeck, localBookIds } from "../sync/deck";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
 
@@ -49,6 +51,9 @@ export function DeckList() {
   const [items, setItems] = useState<DeckVM[] | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("l");
   const regenRef = useRef(false);
+  // Books in the account that aren't on THIS device yet → one-tap cloud download (Pro).
+  const [cloud, setCloud] = useState<AccountBook[]>([]);
+  const [downloading, setDownloading] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const decks = await listDecks();
@@ -62,9 +67,40 @@ export function DeckList() {
     setItems(vms);
   }, []);
 
+  const loadCloud = useCallback(async () => {
+    try {
+      const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
+      setCloud(acct.books.filter((b) => !local.has(b.book_id)));
+    } catch {
+      setCloud([]); // signed out / offline — no cloud section
+    }
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    void loadCloud();
+  }, [load, loadCloud]);
+
+  const onDownload = useCallback(
+    async (b: AccountBook) => {
+      setDownloading((s) => new Set(s).add(b.book_id));
+      try {
+        await downloadDeck(b);
+        bumpDecks();
+        await load();
+        setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
+      } catch (e) {
+        Alert.alert("取り込みエラー", e instanceof Error ? e.message : String(e));
+      } finally {
+        setDownloading((s) => {
+          const n = new Set(s);
+          n.delete(b.book_id);
+          return n;
+        });
+      }
+    },
+    [load, bumpDecks],
+  );
 
   useEffect(() => {
     getMeta("bookshelfView").then((v) => {
@@ -169,14 +205,17 @@ export function DeckList() {
           text: "削除",
           style: "destructive",
           onPress: async () => {
+            const bid = await deckBookId(deck.id);
             await deleteDeck(deck.id);
+            if (bid) void unregisterBook(bid).catch(() => {}); // free the account-global slot
             bumpDecks();
             load();
+            void loadCloud();
           },
         },
       ]);
     },
-    [load],
+    [load, loadCloud],
   );
 
   const onLongPress = useCallback(
@@ -258,7 +297,7 @@ export function DeckList() {
         <View style={styles.center}>
           <Text style={styles.muted}>読み込み中…</Text>
         </View>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && cloud.length === 0 ? (
         <View style={styles.center}>
           <Text style={styles.emptyTitle}>本棚は空です</Text>
           <Text style={styles.muted}>「＋ 取り込む」から赤シート対応PDFを追加</Text>
@@ -272,6 +311,32 @@ export function DeckList() {
           columnWrapperStyle={cols > 1 ? styles.row : undefined}
           contentContainerStyle={styles.grid}
           renderItem={viewMode === "list" ? renderList : renderGrid}
+          ListFooterComponent={
+            cloud.length > 0 ? (
+              <View style={styles.cloudSection}>
+                <Text style={styles.cloudTitle}>クラウド（他の端末の本）</Text>
+                {cloud.map((b) => (
+                  <View key={b.book_id} style={styles.cloudRow}>
+                    <View style={styles.cloudInfo}>
+                      <Text style={styles.cloudName} numberOfLines={1}>
+                        {b.name || "（無題）"}
+                      </Text>
+                      {b.device ? <Text style={styles.cloudDevice}>{b.device}</Text> : null}
+                    </View>
+                    <Pressable
+                      style={styles.cloudBtn}
+                      disabled={downloading.has(b.book_id)}
+                      onPress={() => onDownload(b)}
+                    >
+                      <Text style={styles.cloudBtnText}>
+                        {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : null
+          }
         />
       )}
 
@@ -346,4 +411,25 @@ const styles = StyleSheet.create({
   listName: { fontSize: 15, fontWeight: "600", color: colors.text },
   footer: { flexDirection: "row", justifyContent: "space-around", paddingVertical: 10 },
   footerLinkText: { color: colors.muted, fontSize: 13 },
+  cloudSection: {
+    marginTop: 8,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 6,
+  },
+  cloudTitle: { fontSize: 13, fontWeight: "700", color: colors.textSub, marginBottom: 2 },
+  cloudRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
+  cloudInfo: { flex: 1 },
+  cloudName: { fontSize: 14, fontWeight: "600", color: colors.text },
+  cloudDevice: { fontSize: 11, color: colors.muted },
+  cloudBtn: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  cloudBtnText: { color: colors.ocean, fontSize: 13, fontWeight: "600" },
 });
