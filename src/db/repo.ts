@@ -300,6 +300,26 @@ export async function addBookmark(
   );
 }
 
+/** Bulk-add bookmarks (e.g. imported from a PDF's built-in outline). */
+export async function importBookmarks(
+  deckId: number,
+  items: { title: string; pageIndex: number }[],
+): Promise<void> {
+  if (!items.length) return;
+  await withWriteLock(async () => {
+    const db = await getDb();
+    const now = Date.now();
+    await db.withTransactionAsync(async () => {
+      for (const b of items) {
+        await db.runAsync(
+          "INSERT INTO bookmarks (deckId, pageIndex, title, createdAt) VALUES (?, ?, ?, ?)",
+          [deckId, b.pageIndex, b.title, now],
+        );
+      }
+    });
+  });
+}
+
 export async function listBookmarks(deckId: number): Promise<BookmarkRow[]> {
   const db = await getDb();
   return db.getAllAsync<BookmarkRow>(

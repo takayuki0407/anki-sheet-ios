@@ -196,11 +196,56 @@ export async function detectSinglePage(
   }
 }
 
+export interface OutlineBookmark {
+  title: string;
+  pageIndex: number;
+}
+
+type OutlineNode = NonNullable<Awaited<ReturnType<PDFDocumentProxy["getOutline"]>>>[number];
+
+/** Resolve an outline item's destination (named or explicit) to a 0-based page index. */
+async function destPageIndex(doc: PDFDocumentProxy, dest: OutlineNode["dest"]): Promise<number | null> {
+  try {
+    const explicit = typeof dest === "string" ? await doc.getDestination(dest) : dest;
+    const ref = Array.isArray(explicit) ? explicit[0] : null;
+    if (!ref) return null;
+    return await doc.getPageIndex(ref);
+  } catch {
+    return null;
+  }
+}
+
+/** Read the PDF's built-in outline (目次/しおり) as flat bookmarks, indenting nested entries. */
+export async function extractOutline(doc: PDFDocumentProxy): Promise<OutlineBookmark[]> {
+  let nodes: OutlineNode[] | null = null;
+  try {
+    nodes = await doc.getOutline();
+  } catch {
+    return [];
+  }
+  if (!nodes?.length) return [];
+  const out: OutlineBookmark[] = [];
+  const walk = async (items: OutlineNode[], depth: number): Promise<void> => {
+    for (const it of items) {
+      const title = (it.title ?? "").trim();
+      const pageIndex = await destPageIndex(doc, it.dest);
+      if (title && pageIndex != null) {
+        out.push({ title: depth > 0 ? "　".repeat(depth) + title : title, pageIndex });
+      }
+      if (it.items?.length) await walk(it.items, depth + 1);
+    }
+  };
+  await walk(nodes, 0);
+  return out;
+}
+
 export interface PdfDetectionResult {
   pageCount: number;
   pageW: number;
   pageH: number;
   clozes: DetectedCloze[];
+  /** The PDF's built-in outline (目次) as bookmarks, if any. */
+  outline: OutlineBookmark[];
 }
 
 const yieldToUI = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -234,6 +279,7 @@ export async function detectClozesInPdf(
     const scale = detectScale();
     const cleanupEvery = scale < DETECT_SCALE ? 8 : 16;
     let clozes: DetectedCloze[] = [];
+    let outline: OutlineBookmark[] = [];
     let pageW = 0;
     let pageH = 0;
     try {
@@ -260,12 +306,14 @@ export async function detectClozesInPdf(
       }
       stage = "filterByHeight";
       clozes = filterByHeight(clozes, cfg.maxHeightRatio);
+      stage = "outline";
+      outline = await extractOutline(doc);
     } finally {
       canvas.width = 0;
       canvas.height = 0;
       await doc.loadingTask.destroy();
     }
-    return { pageCount, pageW, pageH, clozes };
+    return { pageCount, pageW, pageH, clozes, outline };
   } catch (e) {
     if (e instanceof CancelledError) throw e;
     if (e instanceof Error) e.message = `${e.message} [stage=${stage}, build=${__BUILD_ID__}]`;

@@ -15,7 +15,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { useApp } from "../store/session";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import { stagePdf } from "../engine/setupEngine";
-import { importDeck } from "../db/repo";
+import { importBookmarks, importDeck } from "../db/repo";
 import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "../types";
 import type { PdfDetectionResult } from "../engine/protocol";
 import { colors } from "../ui/theme";
@@ -118,6 +118,8 @@ export function ImportWizard() {
         clozes: result.clozes,
         coverDataUrl: cover,
       });
+      // Import the PDF's built-in outline (目次) as bookmarks, if it has one.
+      if (result.outline.length) await importBookmarks(deckId, result.outline);
       setView({ name: "viewer", deckId });
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : String(e));
@@ -188,6 +190,9 @@ export function ImportWizard() {
             <View style={styles.reviewInfo}>
               <Text style={styles.detected}>{result.clozes.length} 件の答えを検出</Text>
               <Text style={styles.muted}>{result.pageCount} ページ</Text>
+              {result.outline.length > 0 && (
+                <Text style={styles.muted}>目次 {result.outline.length} 件を取り込み</Text>
+              )}
             </View>
           </View>
 
