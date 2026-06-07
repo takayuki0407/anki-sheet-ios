@@ -20,7 +20,7 @@ import {
   setMeta,
 } from "../db/repo";
 import { exportBackup, importBackup } from "../db/backup";
-import { listBooks, unregisterBook, type AccountBook } from "../sync/api";
+import { listBooks, unregisterBook, updateBookMeta, type AccountBook } from "../sync/api";
 import { deckBookId, downloadDeck, localBookIds } from "../sync/deck";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
@@ -30,6 +30,7 @@ interface DeckVM {
   cover?: string;
   count: number;
   favorite: boolean;
+  openedAt: number;
 }
 
 type ViewMode = "xl" | "l" | "m" | "list";
@@ -44,18 +45,20 @@ const VIEW_ORDER: ViewMode[] = ["xl", "l", "m", "list"];
 const isViewMode = (v: unknown): v is ViewMode =>
   v === "xl" || v === "l" || v === "m" || v === "list";
 
-type SortMode = "new" | "name" | "answers";
+type SortMode = "new" | "name" | "recent";
 const SORT_LABELS: Record<SortMode, string> = {
   new: "新しい順",
   name: "名前順",
-  answers: "暗記数順",
+  recent: "最近開いた順",
 };
-const SORT_ORDER: SortMode[] = ["new", "name", "answers"];
+const SORT_ORDER: SortMode[] = ["new", "name", "recent"];
 const isSortMode = (v: unknown): v is SortMode =>
-  v === "new" || v === "name" || v === "answers";
+  v === "new" || v === "name" || v === "recent";
 
-// Favorites stay local to the device (meta `fav:<deckId>`); no schema change / sync.
+// Per-book bookshelf state. favorite + opened time are kept in meta locally and mirrored to the
+// account (books.favorite / books.opened_at) so they follow you across devices.
 const favKey = (deckId: number) => `fav:${deckId}`;
+const openedKey = (deckId: number) => `opened:${deckId}`;
 
 /** Favorites pinned to the top, then ordered by the chosen mode. */
 function sortItems(items: DeckVM[], mode: SortMode): DeckVM[] {
@@ -63,7 +66,7 @@ function sortItems(items: DeckVM[], mode: SortMode): DeckVM[] {
     const fav = (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0);
     if (fav !== 0) return fav;
     if (mode === "name") return a.deck.name.localeCompare(b.deck.name, "ja");
-    if (mode === "answers") return b.count - a.count;
+    if (mode === "recent") return b.openedAt - a.openedAt;
     return b.deck.createdAt - a.deck.createdAt;
   });
 }
@@ -89,6 +92,7 @@ export function DeckList() {
         cover: await getCover(deck.id),
         count: await answerCount(deck.id),
         favorite: (await getMeta(favKey(deck.id))) === "1",
+        openedAt: Number((await getMeta(openedKey(deck.id))) ?? 0),
       })),
     );
     setItems(vms);
@@ -98,10 +102,25 @@ export function DeckList() {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
       setCloud(acct.books.filter((b) => !local.has(b.book_id)));
+      // Adopt favorite / latest-opened state set on other devices for books we also have locally.
+      let changed = false;
+      for (const b of acct.books) {
+        const deckId = local.get(b.book_id);
+        if (deckId == null) continue;
+        if (((await getMeta(favKey(deckId))) === "1") !== !!b.favorite) {
+          await setMeta(favKey(deckId), b.favorite ? "1" : "0");
+          changed = true;
+        }
+        if ((b.opened_at ?? 0) > Number((await getMeta(openedKey(deckId))) ?? 0)) {
+          await setMeta(openedKey(deckId), String(b.opened_at));
+          changed = true;
+        }
+      }
+      if (changed) await load();
     } catch {
       setCloud([]); // signed out / offline — no cloud section
     }
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     load();
@@ -200,7 +219,7 @@ export function DeckList() {
     ]);
   }, [sortMode]);
 
-  // Toggle favorite (pinned to top). Persists the new value to device-local meta.
+  // Toggle favorite (pinned to top). Persists locally and mirrors to the account (best-effort).
   const toggleFavorite = useCallback((deck: DeckRow) => {
     setItems((prev) => {
       if (!prev) return prev;
@@ -208,10 +227,33 @@ export function DeckList() {
         x.deck.id === deck.id ? { ...x, favorite: !x.favorite } : x,
       );
       const nv = next.find((x) => x.deck.id === deck.id);
-      if (nv) void setMeta(favKey(deck.id), nv.favorite ? "1" : "0");
+      if (nv) {
+        void setMeta(favKey(deck.id), nv.favorite ? "1" : "0");
+        void (async () => {
+          const bid = await deckBookId(deck.id);
+          if (bid) await updateBookMeta(bid, { favorite: nv.favorite });
+        })().catch(() => {});
+      }
       return next;
     });
   }, []);
+
+  // Open a book: stamp the last-opened time (for 最近開いた順), mirror it to the account, navigate.
+  const openDeck = useCallback(
+    (deck: DeckRow) => {
+      const now = Date.now();
+      void setMeta(openedKey(deck.id), String(now));
+      setItems((prev) =>
+        prev ? prev.map((x) => (x.deck.id === deck.id ? { ...x, openedAt: now } : x)) : prev,
+      );
+      void (async () => {
+        const bid = await deckBookId(deck.id);
+        if (bid) await updateBookMeta(bid, { openedAt: now });
+      })().catch(() => {});
+      setView({ name: "viewer", deckId: deck.id });
+    },
+    [setView],
+  );
 
   const onBackup = useCallback(() => {
     Alert.alert("バックアップ", "全データ（PDF含む）をJSONで入出力します。", [
@@ -278,7 +320,7 @@ export function DeckList() {
     (vm: DeckVM) => {
       const deck = vm.deck;
       Alert.alert(deck.name, undefined, [
-        { text: "開く", onPress: () => setView({ name: "viewer", deckId: deck.id }) },
+        { text: "開く", onPress: () => openDeck(deck) },
         {
           text: vm.favorite ? "お気に入りを解除" : "お気に入りに追加",
           onPress: () => toggleFavorite(deck),
@@ -288,7 +330,7 @@ export function DeckList() {
         { text: "キャンセル", style: "cancel" },
       ]);
     },
-    [confirmDelete, setView, toggleFavorite],
+    [confirmDelete, setView, toggleFavorite, openDeck],
   );
 
   const cols = COLS[viewMode];
@@ -297,7 +339,7 @@ export function DeckList() {
   const renderGrid = ({ item }: { item: DeckVM }) => (
     <Pressable
       style={styles.card}
-      onPress={() => setView({ name: "viewer", deckId: item.deck.id })}
+      onPress={() => openDeck(item.deck)}
       onLongPress={() => onLongPress(item)}
     >
       <View style={styles.coverWrap}>
@@ -324,7 +366,7 @@ export function DeckList() {
   const renderList = ({ item }: { item: DeckVM }) => (
     <Pressable
       style={styles.listRow}
-      onPress={() => setView({ name: "viewer", deckId: item.deck.id })}
+      onPress={() => openDeck(item.deck)}
       onLongPress={() => onLongPress(item)}
     >
       {item.cover ? (

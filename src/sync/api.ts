@@ -57,6 +57,23 @@ export async function unregisterBook(bookId: string): Promise<void> {
   if (!res.ok && res.status !== 404) throw new Error(`unregister failed: ${res.status}`);
 }
 
+/** Sync per-book bookshelf state (favorite / last-opened) for the account. Best-effort: callers
+ * ignore errors, and a missing/standard book is a harmless no-op on the server. */
+export async function updateBookMeta(
+  bookId: string,
+  patch: { favorite?: boolean; openedAt?: number },
+): Promise<void> {
+  const body: { favorite?: boolean; opened_at?: number } = {};
+  if (patch.favorite !== undefined) body.favorite = patch.favorite;
+  if (patch.openedAt !== undefined) body.opened_at = patch.openedAt;
+  const res = await authedFetch(`/books/${encodeURIComponent(bookId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok && res.status !== 404 && res.status !== 403)
+    throw new Error(`updateBookMeta failed: ${res.status}`);
+}
+
 export interface AccountBook {
   book_id: string;
   name: string;
@@ -64,6 +81,10 @@ export interface AccountBook {
   page_count: number;
   device: string | null;
   updated_at: number;
+  /** Pinned to the top of the bookshelf when 1 (synced across the account's devices). */
+  favorite: number;
+  /** Last-opened time (epoch ms) — drives 最近開いた順; server keeps the MAX across devices. */
+  opened_at: number;
 }
 
 export interface AccountBooks {
