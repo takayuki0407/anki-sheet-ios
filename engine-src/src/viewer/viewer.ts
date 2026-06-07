@@ -93,7 +93,6 @@ export class Viewer {
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
-  private manualSoftEl: HTMLElement | null = null;
   private manualGripEl: HTMLElement | null = null;
   private band = { top: 80, height: 150 };
 
@@ -554,45 +553,35 @@ export class Viewer {
     if (on === !!this.manualSheetEl) return;
     if (!on) {
       this.manualSheetEl?.remove();
-      this.manualSoftEl?.remove();
       this.manualGripEl?.remove();
       this.manualSheetEl = null;
-      this.manualSoftEl = null;
       this.manualGripEl = null;
       return;
     }
     const sheet = document.createElement("div");
     sheet.className = "rsheet";
-    const soft = document.createElement("div");
-    soft.className = "rsheet-soft";
     const grip = document.createElement("div");
     grip.className = "rsheet-grip";
     document.body.appendChild(sheet);
-    document.body.appendChild(soft);
     document.body.appendChild(grip);
     this.manualSheetEl = sheet;
-    this.manualSoftEl = soft;
     this.manualGripEl = grip;
     this.layoutManualSheet();
-    this.attachSheetDrag(sheet, "move");
-    this.attachSheetDrag(grip, "resize");
+    // Only the top grip is draggable (resizes the top edge); the sheet body is pointer-events:none
+    // so touches fall through to the page for scrolling/paging.
+    this.attachSheetDrag(grip);
   }
 
   private layoutManualSheet(): void {
     if (!this.manualSheetEl || !this.manualGripEl) return;
-    this.manualSheetEl.style.top = `${this.band.top}px`;
-    this.manualSheetEl.style.height = `${this.band.height}px`;
-    if (this.manualSoftEl) {
-      this.manualSoftEl.style.top = `${this.band.top}px`;
-      this.manualSoftEl.style.height = `${this.band.height}px`;
-    }
+    this.manualSheetEl.style.top = `${this.band.top}px`; // bottom pinned via CSS (bottom: 0)
     this.manualGripEl.style.top = `${this.band.top - 13}px`; // grip on the TOP edge
   }
 
-  private attachSheetDrag(el: HTMLElement, mode: "move" | "resize"): void {
+  // The grip drags the TOP edge; the bottom edge stays pinned to the viewport bottom.
+  private attachSheetDrag(el: HTMLElement): void {
     let startY = 0;
     let startTop = 0;
-    let startH = 0;
     let active = false;
     el.addEventListener(
       "touchstart",
@@ -601,7 +590,6 @@ export class Viewer {
         active = true;
         startY = e.touches[0].clientY;
         startTop = this.band.top;
-        startH = this.band.height;
         e.preventDefault();
         e.stopPropagation();
       },
@@ -611,16 +599,9 @@ export class Viewer {
       "touchmove",
       (e: TouchEvent) => {
         if (!active || e.touches.length !== 1) return;
-        const dy = e.touches[0].clientY - startY;
         const vh = window.innerHeight || 1;
-        if (mode === "move") {
-          this.band.top = Math.max(0, Math.min(Math.max(0, vh - this.band.height), startTop + dy));
-        } else {
-          // Resize from the TOP edge: the bottom stays fixed, the top moves.
-          const bottom = startTop + startH;
-          this.band.top = Math.max(0, Math.min(bottom - 28, startTop + dy));
-          this.band.height = bottom - this.band.top;
-        }
+        this.band.top = Math.max(0, Math.min(vh - 28, startTop + (e.touches[0].clientY - startY)));
+        this.band.height = vh - this.band.top;
         this.layoutManualSheet();
         e.preventDefault();
         e.stopPropagation();
@@ -628,7 +609,6 @@ export class Viewer {
       { passive: false },
     );
     const end = () => {
-      // Report the new band so the native screen can persist it across sessions.
       if (active) this.emit({ type: "band-changed", top: this.band.top, height: this.band.height });
       active = false;
     };

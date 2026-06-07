@@ -100,26 +100,14 @@
         position: fixed;
         left: 0;
         right: 0;
+        bottom: 0; /* the bottom edge stays at the viewport bottom; only the top edge moves */
         z-index: 8;
-        /* Pure-red multiply maps red/magenta answers to (R,0,0) = the red-tinted background so
-           they fully vanish while black text stays readable. */
-        background: #ff0000;
+        /* Muted-red multiply keeps black text BLACK (black × red = black) while it desaturates the
+           red/magenta answers toward the red background (a slight trace may remain). */
+        background: #c83232;
         mix-blend-mode: multiply;
-        border-radius: 6px;
-        box-shadow: 0 0 0 2px rgba(214, 51, 132, 0.55) inset;
-        touch-action: none;
-      }
-      /* A plain-blend layer over the multiply-red that LIGHTENS it toward a gentle pink. The
-         answers are identical to the background after the multiply, so this uniform layer keeps
-         them hidden while softening the harsh red and keeping black text legible. */
-      .rsheet-soft {
-        position: fixed;
-        left: 0;
-        right: 0;
-        z-index: 8;
-        background: rgba(255, 255, 255, 0.45);
-        border-radius: 6px;
-        pointer-events: none;
+        box-shadow: inset 0 2px 0 rgba(190, 24, 60, 0.6); /* a line marking the top edge */
+        pointer-events: none; /* scroll / swipe the page through the sheet */
       }
       .rsheet-grip {
         position: fixed;
