@@ -29,6 +29,7 @@ interface DeckVM {
   deck: DeckRow;
   cover?: string;
   count: number;
+  favorite: boolean;
 }
 
 type ViewMode = "xl" | "l" | "m" | "list";
@@ -43,6 +44,30 @@ const VIEW_ORDER: ViewMode[] = ["xl", "l", "m", "list"];
 const isViewMode = (v: unknown): v is ViewMode =>
   v === "xl" || v === "l" || v === "m" || v === "list";
 
+type SortMode = "new" | "name" | "answers";
+const SORT_LABELS: Record<SortMode, string> = {
+  new: "新しい順",
+  name: "名前順",
+  answers: "暗記数順",
+};
+const SORT_ORDER: SortMode[] = ["new", "name", "answers"];
+const isSortMode = (v: unknown): v is SortMode =>
+  v === "new" || v === "name" || v === "answers";
+
+// Favorites stay local to the device (meta `fav:<deckId>`); no schema change / sync.
+const favKey = (deckId: number) => `fav:${deckId}`;
+
+/** Favorites pinned to the top, then ordered by the chosen mode. */
+function sortItems(items: DeckVM[], mode: SortMode): DeckVM[] {
+  return [...items].sort((a, b) => {
+    const fav = (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0);
+    if (fav !== 0) return fav;
+    if (mode === "name") return a.deck.name.localeCompare(b.deck.name, "ja");
+    if (mode === "answers") return b.count - a.count;
+    return b.deck.createdAt - a.deck.createdAt;
+  });
+}
+
 export function DeckList() {
   const setView = useApp((s) => s.setView);
   const bumpDecks = useApp((s) => s.bumpDecks);
@@ -50,6 +75,7 @@ export function DeckList() {
   const engine = useDetectionEngine();
   const [items, setItems] = useState<DeckVM[] | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("l");
+  const [sortMode, setSortMode] = useState<SortMode>("new");
   const regenRef = useRef(false);
   // Books in the account that aren't on THIS device yet → one-tap cloud download (Pro).
   const [cloud, setCloud] = useState<AccountBook[]>([]);
@@ -62,6 +88,7 @@ export function DeckList() {
         deck,
         cover: await getCover(deck.id),
         count: await answerCount(deck.id),
+        favorite: (await getMeta(favKey(deck.id))) === "1",
       })),
     );
     setItems(vms);
@@ -105,6 +132,9 @@ export function DeckList() {
   useEffect(() => {
     getMeta("bookshelfView").then((v) => {
       if (isViewMode(v)) setViewMode(v);
+    });
+    getMeta("bookshelfSort").then((v) => {
+      if (isSortMode(v)) setSortMode(v);
     });
   }, []);
 
@@ -156,6 +186,32 @@ export function DeckList() {
       { text: "キャンセル", style: "cancel" as const },
     ]);
   }, [viewMode]);
+
+  const pickSort = useCallback(() => {
+    Alert.alert("並び替え", undefined, [
+      ...SORT_ORDER.map((m) => ({
+        text: SORT_LABELS[m] + (sortMode === m ? "  ✓" : ""),
+        onPress: () => {
+          setSortMode(m);
+          void setMeta("bookshelfSort", m);
+        },
+      })),
+      { text: "キャンセル", style: "cancel" as const },
+    ]);
+  }, [sortMode]);
+
+  // Toggle favorite (pinned to top). Persists the new value to device-local meta.
+  const toggleFavorite = useCallback((deck: DeckRow) => {
+    setItems((prev) => {
+      if (!prev) return prev;
+      const next = prev.map((x) =>
+        x.deck.id === deck.id ? { ...x, favorite: !x.favorite } : x,
+      );
+      const nv = next.find((x) => x.deck.id === deck.id);
+      if (nv) void setMeta(favKey(deck.id), nv.favorite ? "1" : "0");
+      return next;
+    });
+  }, []);
 
   const onBackup = useCallback(() => {
     Alert.alert("バックアップ", "全データ（PDF含む）をJSONで入出力します。", [
@@ -219,24 +275,30 @@ export function DeckList() {
   );
 
   const onLongPress = useCallback(
-    (deck: DeckRow) => {
+    (vm: DeckVM) => {
+      const deck = vm.deck;
       Alert.alert(deck.name, undefined, [
         { text: "開く", onPress: () => setView({ name: "viewer", deckId: deck.id }) },
+        {
+          text: vm.favorite ? "お気に入りを解除" : "お気に入りに追加",
+          onPress: () => toggleFavorite(deck),
+        },
         { text: "設定・再検出", onPress: () => setView({ name: "settings", deckId: deck.id }) },
         { text: "削除", style: "destructive", onPress: () => confirmDelete(deck) },
         { text: "キャンセル", style: "cancel" },
       ]);
     },
-    [confirmDelete, setView],
+    [confirmDelete, setView, toggleFavorite],
   );
 
   const cols = COLS[viewMode];
+  const sorted = items ? sortItems(items, sortMode) : null;
 
   const renderGrid = ({ item }: { item: DeckVM }) => (
     <Pressable
       style={styles.card}
       onPress={() => setView({ name: "viewer", deckId: item.deck.id })}
-      onLongPress={() => onLongPress(item.deck)}
+      onLongPress={() => onLongPress(item)}
     >
       <View style={styles.coverWrap}>
         {item.cover ? (
@@ -246,6 +308,11 @@ export function DeckList() {
             <Text style={styles.muted}>PDF</Text>
           </View>
         )}
+        <Pressable style={styles.favBadge} onPress={() => toggleFavorite(item.deck)} hitSlop={8}>
+          <Text style={[styles.favStar, item.favorite && styles.favStarOn]}>
+            {item.favorite ? "★" : "☆"}
+          </Text>
+        </Pressable>
       </View>
       <Text style={styles.cardName} numberOfLines={2}>
         {item.deck.name}
@@ -258,7 +325,7 @@ export function DeckList() {
     <Pressable
       style={styles.listRow}
       onPress={() => setView({ name: "viewer", deckId: item.deck.id })}
-      onLongPress={() => onLongPress(item.deck)}
+      onLongPress={() => onLongPress(item)}
     >
       {item.cover ? (
         <Image source={{ uri: item.cover }} style={styles.listCover} resizeMode="cover" />
@@ -273,6 +340,11 @@ export function DeckList() {
         </Text>
         <Text style={styles.cardCount}>{item.count} 問</Text>
       </View>
+      <Pressable style={styles.favBadgeList} onPress={() => toggleFavorite(item.deck)} hitSlop={8}>
+        <Text style={[styles.favStar, item.favorite && styles.favStarOn]}>
+          {item.favorite ? "★" : "☆"}
+        </Text>
+      </Pressable>
     </Pressable>
   );
 
@@ -287,14 +359,22 @@ export function DeckList() {
           </View>
         </View>
         <View style={styles.headerBtns}>
-          <Pressable style={styles.viewBtn} onPress={pickView} hitSlop={6}>
-            <Text style={styles.viewBtnText}>表示</Text>
-          </Pressable>
           <Pressable style={styles.addBtn} onPress={onImport}>
             <Text style={styles.addBtnText}>＋ 取り込む</Text>
           </Pressable>
         </View>
       </View>
+
+      {sorted && sorted.length > 0 && (
+        <View style={styles.toolbar}>
+          <Pressable style={styles.toolBtn} onPress={pickSort} hitSlop={6}>
+            <Text style={styles.toolBtnText}>並び替え：{SORT_LABELS[sortMode]}</Text>
+          </Pressable>
+          <Pressable style={styles.toolBtn} onPress={pickView} hitSlop={6}>
+            <Text style={styles.toolBtnText}>表示：{VIEW_LABELS[viewMode]}</Text>
+          </Pressable>
+        </View>
+      )}
 
       {items === null ? (
         <View style={styles.center}>
@@ -308,7 +388,7 @@ export function DeckList() {
       ) : (
         <FlatList
           key={viewMode}
-          data={items}
+          data={sorted ?? items}
           keyExtractor={(it) => String(it.deck.id)}
           numColumns={cols}
           columnWrapperStyle={cols > 1 ? styles.row : undefined}
@@ -368,16 +448,20 @@ const styles = StyleSheet.create({
   brand: { fontSize: 22, fontWeight: "800", color: "#b9824f" },
   brandSub: { fontSize: 12, color: colors.textSub },
   headerBtns: { flexDirection: "row", alignItems: "center", gap: 8 },
-  viewBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  viewBtnText: { color: colors.text, fontWeight: "600" },
   addBtn: { backgroundColor: colors.sand, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
   addBtnText: { color: "#fff", fontWeight: "700" },
+  toolbar: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  toolBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  toolBtnText: { color: colors.textSub, fontSize: 13, fontWeight: "600" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 6 },
   emptyTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
   muted: { color: colors.muted, fontSize: 13 },
@@ -394,6 +478,20 @@ const styles = StyleSheet.create({
   },
   cover: { width: "100%", height: "100%" },
   coverPlaceholder: { alignItems: "center", justifyContent: "center" },
+  favBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  favBadgeList: { paddingHorizontal: 6, paddingVertical: 6 },
+  favStar: { fontSize: 16, color: colors.muted },
+  favStarOn: { color: colors.sand },
   cardName: { marginTop: 6, fontSize: 13, fontWeight: "600", color: colors.text },
   cardCount: { fontSize: 12, color: colors.textSub },
   listRow: {
