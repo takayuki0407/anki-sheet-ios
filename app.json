@@ -30,11 +30,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-asset",
-      "expo-sharing",
-      "expo-sqlite"
-    ],
+    "plugins": ["expo-asset", "expo-sqlite"],
     "extra": {
       "eas": {
         "projectId": "bb97a775-12cf-4e3f-ac57-9bd93d99741e"
