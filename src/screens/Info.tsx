@@ -16,6 +16,7 @@ import { useApp } from "../store/session";
 import { FREE_DECK_LIMIT, useEntitlements } from "../iap/entitlements";
 import { deckCountTotal } from "../db/repo";
 import { restore } from "../iap/purchases";
+import { deleteAccount, signOut, useAccount } from "../auth/account";
 import {
   APP_STORE_ID,
   APP_VERSION,
@@ -80,6 +81,7 @@ function Help({ q, a }: { q: string; a: string }) {
 export function Info() {
   const setView = useApp((s) => s.setView);
   const isPremium = useEntitlements((s) => s.isPremium);
+  const user = useAccount((s) => s.user);
   const [deckCount, setDeckCount] = useState<number | null>(null);
   const [showLicenses, setShowLicenses] = useState(false);
 
@@ -117,6 +119,44 @@ export function Info() {
     } catch (e) {
       Alert.alert("エラー", e instanceof Error ? e.message : String(e));
     }
+  }, []);
+
+  const onSignOut = useCallback(async () => {
+    try {
+      await signOut();
+    } catch (e) {
+      Alert.alert("エラー", e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const onDeleteAccount = useCallback(() => {
+    Alert.alert(
+      "アカウントを削除",
+      "アカウントと、サブスクリプションとの関連付けを削除します。この操作は取り消せません。",
+      [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "削除",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await deleteAccount();
+              Alert.alert("削除しました");
+            } catch (e) {
+              const code = (e as { code?: string }).code;
+              Alert.alert(
+                "エラー",
+                code === "auth/requires-recent-login"
+                  ? "セキュリティのため、もう一度ログインしてから削除してください。"
+                  : e instanceof Error
+                    ? e.message
+                    : String(e),
+              );
+            }
+          },
+        },
+      ],
+    );
   }, []);
 
   return (
@@ -162,6 +202,18 @@ export function Info() {
             onPress={() => Linking.openURL(MANAGE_SUBSCRIPTIONS_URL)}
           />
           <Row label="購入を復元" onPress={doRestore} />
+        </Section>
+
+        <Section title="アカウント">
+          {user ? (
+            <>
+              <Row label="ログイン中" value={user.email ?? "Apple ID でログイン"} />
+              <Row label="ログアウト" onPress={onSignOut} />
+              <Row label="アカウントを削除" onPress={onDeleteAccount} />
+            </>
+          ) : (
+            <Row label="ログイン / 新規登録" onPress={() => setView({ name: "login" })} />
+          )}
         </Section>
 
         <Section title="サポート">

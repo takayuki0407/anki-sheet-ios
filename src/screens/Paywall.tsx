@@ -59,6 +59,9 @@ export function Paywall() {
         <Text style={styles.lead}>
           無料プランは本を {FREE_DECK_LIMIT} 冊まで。Premium で冊数無制限＋全機能を解放。
         </Text>
+        <Pressable onPress={() => setView({ name: "login" })} hitSlop={6}>
+          <Text style={styles.loginLink}>すでにPremiumをお持ちの方はログイン</Text>
+        </Pressable>
         <View style={styles.features}>
           <Text style={styles.feature}>・本（PDF）を無制限に取り込み</Text>
           <Text style={styles.feature}>・色チューニング / 再検出</Text>
@@ -127,6 +130,7 @@ const styles = StyleSheet.create({
   body: { flex: 1, justifyContent: "center", gap: 14 },
   title: { fontSize: 26, fontWeight: "800", color: colors.sand, textAlign: "center" },
   lead: { fontSize: 15, color: colors.text, textAlign: "center", lineHeight: 22 },
+  loginLink: { color: colors.ocean, fontSize: 14, textAlign: "center" },
   features: { gap: 6, alignSelf: "center", marginBottom: 4 },
   feature: { fontSize: 14, color: colors.textSub },
   cta: { backgroundColor: colors.sand, paddingVertical: 16, borderRadius: 14, alignItems: "center" },

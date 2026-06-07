@@ -12,9 +12,11 @@ import { PageViewer } from "./src/screens/PageViewer";
 import { Settings } from "./src/screens/Settings";
 import { Paywall } from "./src/screens/Paywall";
 import { Info } from "./src/screens/Info";
+import { Login } from "./src/screens/Login";
 import { EngineTest } from "./src/screens/EngineTest";
 import { Onboarding } from "./src/screens/Onboarding";
 import { getMeta, setMeta } from "./src/db/repo";
+import { initAuthListener } from "./src/auth/account";
 import { colors } from "./src/ui/theme";
 
 function Router() {
@@ -32,6 +34,8 @@ function Router() {
       return <Paywall />;
     case "info":
       return <Info />;
+    case "login":
+      return <Login />;
     case "engineTest":
       return <EngineTest />;
   }
@@ -41,6 +45,7 @@ export default function App() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   useEffect(() => {
     void initPurchases();
+    initAuthListener();
     getMeta("onboarded").then((v) => setOnboarded(v === "1"));
   }, []);
   return (
