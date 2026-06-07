@@ -52,17 +52,17 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [mode, setMode] = useState<ReadMode>("scroll");
   const [fit, setFit] = useState<FitMode>("width");
   const [zoom, setZoom] = useState(1);
-  const [sheetOn, setSheetOn] = useState(true);
-  const [manualSheet, setManualSheet] = useState(false);
+  const [redMode, setRedMode] = useState<"mask" | "sheet" | "off">("mask");
   const [err, setErr] = useState<string | null>(null);
   const [bmOpen, setBmOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revealSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const revealStateRef = useRef<{ revealed: number[]; sheetOn: boolean }>({
-    revealed: [],
-    sheetOn: true,
-  });
+  const revealStateRef = useRef<{
+    revealed: number[];
+    redMode: "mask" | "sheet" | "off";
+    band: { top: number; height: number };
+  }>({ revealed: [], redMode: "mask", band: { top: 80, height: 150 } });
 
   useEffect(() => {
     let alive = true;
@@ -82,19 +82,26 @@ export function PageViewer({ deckId }: { deckId: number }) {
         }
         const startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
         const startMode: ReadMode = deck.lastMode ?? "scroll";
-        // Restore the red-sheet reveal state (per-rect keys + sheet on/off) from last session.
+        // Restore the red overlay (mode + reveals + band) from last session.
         let savedRevealed: number[] = [];
-        let savedSheetOn = true;
+        let savedMode: "mask" | "sheet" | "off" = "mask";
+        let savedBand = { top: 80, height: 150 };
         if (revealRaw) {
           try {
-            const o = JSON.parse(revealRaw) as { revealed?: number[]; sheetOn?: boolean };
+            const o = JSON.parse(revealRaw) as {
+              revealed?: number[];
+              redMode?: "mask" | "sheet" | "off";
+              sheetOn?: boolean;
+              band?: { top: number; height: number };
+            };
             savedRevealed = o.revealed ?? [];
-            savedSheetOn = o.sheetOn ?? true;
+            savedMode = o.redMode ?? (o.sheetOn === false ? "off" : "mask");
+            if (o.band) savedBand = o.band;
           } catch {
-            /* ignore corrupt reveal state */
+            /* ignore corrupt state */
           }
         }
-        revealStateRef.current = { revealed: savedRevealed, sheetOn: savedSheetOn };
+        revealStateRef.current = { revealed: savedRevealed, redMode: savedMode, band: savedBand };
         const cardsUrl = stageJson(
           cards.map((c) => ({ id: c.id, pageIndex: c.pageIndex, rects: c.rects })),
           `viewer-cards-${deckId}.json`,
@@ -102,7 +109,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
         setName(deck.name);
         setPage(startPage);
         setMode(startMode);
-        setSheetOn(savedSheetOn);
+        setRedMode(savedMode);
         setPageCount(pdf.pageCount);
         setEngineUri(uri);
         setOpenArgs({
@@ -115,8 +122,10 @@ export function PageViewer({ deckId }: { deckId: number }) {
           page: startPage,
           fit: "width",
           zoom: 1,
-          sheetOn: savedSheetOn,
+          sheetOn: savedMode === "mask",
           revealed: savedRevealed,
+          manualOn: savedMode === "sheet" && startMode === "scroll",
+          band: savedBand,
         });
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
@@ -139,17 +148,13 @@ export function PageViewer({ deckId }: { deckId: number }) {
     [deckId],
   );
 
-  // Persist the red-sheet reveal state (debounced) so reopening the book restores it.
-  const persistReveal = useCallback(
-    (revealed: number[], on: boolean) => {
-      revealStateRef.current = { revealed, sheetOn: on };
-      if (revealSaveTimer.current) clearTimeout(revealSaveTimer.current);
-      revealSaveTimer.current = setTimeout(() => {
-        void setMeta(`reveal:${deckId}`, JSON.stringify(revealStateRef.current));
-      }, 400);
-    },
-    [deckId],
-  );
+  // Persist the red overlay state (debounced) so reopening the book restores it.
+  const saveViewerState = useCallback(() => {
+    if (revealSaveTimer.current) clearTimeout(revealSaveTimer.current);
+    revealSaveTimer.current = setTimeout(() => {
+      void setMeta(`reveal:${deckId}`, JSON.stringify(revealStateRef.current));
+    }, 400);
+  }, [deckId]);
 
   const onPageChanged = useCallback(
     (p: number) => {
@@ -161,29 +166,23 @@ export function PageViewer({ deckId }: { deckId: number }) {
 
   const goPrev = () => ref.current?.goToPage(Math.max(0, page - 1));
   const goNext = () => ref.current?.goToPage(Math.min(pageCount - 1, page + 1));
-  // 赤マスク / 赤シート / OFF are EXCLUSIVE (no combining the mask + the manual sheet).
-  const applyRed = (mask: boolean, manual: boolean) => {
-    setSheetOn(mask);
-    ref.current?.setSheet(mask);
-    setManualSheet(manual);
-    ref.current?.setManualSheet(manual);
+  // 赤マスク and 赤シート are separate, mutually-exclusive (no combining); tap the active one to
+  // turn it off. 赤シート is 縦読み only.
+  const applyRed = (next: "mask" | "sheet" | "off") => {
+    setRedMode(next);
+    revealStateRef.current.redMode = next;
+    ref.current?.setSheet(next === "mask");
+    ref.current?.setManualSheet(next === "sheet" && mode === "scroll");
+    saveViewerState();
   };
-  const redMode: "mask" | "sheet" | "off" = sheetOn ? "mask" : manualSheet ? "sheet" : "off";
-  const redModeLabel = redMode === "mask" ? "赤マスク" : redMode === "sheet" ? "赤シート" : "表示OFF";
-  const cycleRed = () => {
-    if (redMode === "mask") applyRed(false, mode === "scroll"); // 赤シート is 縦読み-only
-    else if (redMode === "sheet") applyRed(false, false);
-    else applyRed(true, false);
-  };
+  const selectMask = () => applyRed(redMode === "mask" ? "off" : "mask");
+  const selectSheet = () => applyRed(redMode === "sheet" ? "off" : "sheet");
   const toggleMode = () => {
     const m: ReadMode = mode === "scroll" ? "paged" : "scroll";
     setMode(m);
     ref.current?.setMode(m);
-    // The manual sheet is 縦読み-only; drop it when switching to 横読み.
-    if (m === "paged" && manualSheet) {
-      setManualSheet(false);
-      ref.current?.setManualSheet(false);
-    }
+    // 赤シート is 縦読み-only: show the band only in scroll + sheet mode (redMode preserved).
+    ref.current?.setManualSheet(m === "scroll" && redMode === "sheet");
     void updateDeck(deckId, { lastMode: m });
   };
   const setFitMode = (f: FitMode) => {
@@ -287,9 +286,13 @@ export function PageViewer({ deckId }: { deckId: number }) {
             }}
             onPageChanged={onPageChanged}
             onZoomChanged={setZoom}
-            onRevealChanged={(revealed, on) => {
-              setSheetOn(on);
-              persistReveal(revealed, on);
+            onRevealChanged={(revealed) => {
+              revealStateRef.current.revealed = revealed;
+              saveViewerState();
+            }}
+            onBandChanged={(top, height) => {
+              revealStateRef.current.band = { top, height };
+              saveViewerState();
             }}
             onError={(m) => setErr(m)}
           />
@@ -346,7 +349,10 @@ export function PageViewer({ deckId }: { deckId: number }) {
         </View>
 
         <View style={styles.toolRow}>
-          <Tool label={redModeLabel} on={redMode !== "off"} onPress={cycleRed} />
+          <Tool label="赤マスク" on={redMode === "mask"} onPress={selectMask} />
+          {mode === "scroll" && (
+            <Tool label="赤シート" on={redMode === "sheet"} onPress={selectSheet} />
+          )}
           <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
           <Tool label="目次" onPress={openBookmarks} />
         </View>

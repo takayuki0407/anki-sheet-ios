@@ -31,6 +31,9 @@ export interface OpenBookArgs {
   sheetOn?: boolean;
   /** Revealed card ids to restore from the last session (whole answer reveals together). */
   revealed?: number[];
+  /** Manual red sheet: whether it was on, and its band position/height, last session. */
+  manualOn?: boolean;
+  band?: { top: number; height: number };
 }
 
 export type ViewMode = "scroll" | "paged";
@@ -117,6 +120,7 @@ export class Viewer {
     this.zoom = a.zoom ?? 1;
     this.sheetOn = a.sheetOn ?? true;
     this.revealed = new Set(a.revealed ?? []); // restore last session's reveal state
+    if (a.band) this.band = { top: a.band.top, height: a.band.height };
     this.current = clamp(a.page ?? 0, 0, this.pageCount - 1);
 
     let cards: ViewerCard[] = [];
@@ -135,6 +139,7 @@ export class Viewer {
     this.build();
     this.applySheetClass();
     this.relayout();
+    this.setManualSheet(a.manualOn ?? false); // restore the manual red sheet if it was on
     requestAnimationFrame(() => this.goToPage(this.current, false));
     this.emit({ type: "book-ready", pageCount: this.pageCount, page: this.current });
   }
@@ -570,7 +575,7 @@ export class Viewer {
     if (!this.manualSheetEl || !this.manualGripEl) return;
     this.manualSheetEl.style.top = `${this.band.top}px`;
     this.manualSheetEl.style.height = `${this.band.height}px`;
-    this.manualGripEl.style.top = `${this.band.top + this.band.height - 13}px`;
+    this.manualGripEl.style.top = `${this.band.top - 13}px`; // grip on the TOP edge
   }
 
   private attachSheetDrag(el: HTMLElement, mode: "move" | "resize"): void {
@@ -600,7 +605,10 @@ export class Viewer {
         if (mode === "move") {
           this.band.top = Math.max(0, Math.min(Math.max(0, vh - this.band.height), startTop + dy));
         } else {
-          this.band.height = Math.max(28, Math.min(vh - this.band.top, startH + dy));
+          // Resize from the TOP edge: the bottom stays fixed, the top moves.
+          const bottom = startTop + startH;
+          this.band.top = Math.max(0, Math.min(bottom - 28, startTop + dy));
+          this.band.height = bottom - this.band.top;
         }
         this.layoutManualSheet();
         e.preventDefault();
@@ -609,6 +617,8 @@ export class Viewer {
       { passive: false },
     );
     const end = () => {
+      // Report the new band so the native screen can persist it across sessions.
+      if (active) this.emit({ type: "band-changed", top: this.band.top, height: this.band.height });
       active = false;
     };
     el.addEventListener("touchend", end);

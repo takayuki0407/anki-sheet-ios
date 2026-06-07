@@ -20,6 +20,9 @@ export interface ViewerOpenArgs {
   sheetOn: boolean;
   /** Revealed card ids to restore from the last session. */
   revealed?: number[];
+  /** Manual red sheet: whether it was on, and its band position/height, last session. */
+  manualOn?: boolean;
+  band?: { top: number; height: number };
 }
 
 export interface ViewerHandle {
@@ -38,11 +41,12 @@ interface Props {
   onPageChanged?: (page: number) => void;
   onZoomChanged?: (zoom: number) => void;
   onRevealChanged?: (revealed: number[], sheetOn: boolean) => void;
+  onBandChanged?: (top: number, height: number) => void;
   onError?: (msg: string) => void;
 }
 
 export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebView(
-  { engineUri, open, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onError },
+  { engineUri, open, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onBandChanged, onError },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -90,6 +94,8 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         message?: string;
         revealed?: number[];
         sheetOn?: boolean;
+        top?: number;
+        height?: number;
       };
       try {
         m = JSON.parse(e.nativeEvent.data);
@@ -113,12 +119,16 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         case "reveal-changed":
           onRevealChanged?.(m.revealed ?? [], m.sheetOn ?? true);
           break;
+        case "band-changed":
+          if (typeof m.top === "number" && typeof m.height === "number")
+            onBandChanged?.(m.top, m.height);
+          break;
         case "error":
           onError?.(String(m.message ?? "engine error"));
           break;
       }
     },
-    [sendOpen, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onError],
+    [sendOpen, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onBandChanged, onError],
   );
 
   return (
