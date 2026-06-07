@@ -93,6 +93,7 @@ export class Viewer {
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
+  private manualSoftEl: HTMLElement | null = null;
   private manualGripEl: HTMLElement | null = null;
   private band = { top: 80, height: 150 };
 
@@ -553,18 +554,24 @@ export class Viewer {
     if (on === !!this.manualSheetEl) return;
     if (!on) {
       this.manualSheetEl?.remove();
+      this.manualSoftEl?.remove();
       this.manualGripEl?.remove();
       this.manualSheetEl = null;
+      this.manualSoftEl = null;
       this.manualGripEl = null;
       return;
     }
     const sheet = document.createElement("div");
     sheet.className = "rsheet";
+    const soft = document.createElement("div");
+    soft.className = "rsheet-soft";
     const grip = document.createElement("div");
     grip.className = "rsheet-grip";
     document.body.appendChild(sheet);
+    document.body.appendChild(soft);
     document.body.appendChild(grip);
     this.manualSheetEl = sheet;
+    this.manualSoftEl = soft;
     this.manualGripEl = grip;
     this.layoutManualSheet();
     this.attachSheetDrag(sheet, "move");
@@ -575,6 +582,10 @@ export class Viewer {
     if (!this.manualSheetEl || !this.manualGripEl) return;
     this.manualSheetEl.style.top = `${this.band.top}px`;
     this.manualSheetEl.style.height = `${this.band.height}px`;
+    if (this.manualSoftEl) {
+      this.manualSoftEl.style.top = `${this.band.top}px`;
+      this.manualSoftEl.style.height = `${this.band.height}px`;
+    }
     this.manualGripEl.style.top = `${this.band.top - 13}px`; // grip on the TOP edge
   }
 

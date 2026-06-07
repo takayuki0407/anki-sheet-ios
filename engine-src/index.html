@@ -101,14 +101,25 @@
         left: 0;
         right: 0;
         z-index: 8;
-        /* イルカ-style camouflage: a translucent pink-red overlay (plain alpha blend, no multiply,
-           no stripes). Saturated answer text (magenta/red) differs from the tinted background only
-           in CHROMA so it fades to a faint trace, while black text keeps its LUMINANCE contrast and
-           stays readable. (Opacity controls how faint the answers get.) */
-        background: rgba(230, 95, 115, 0.6);
+        /* Pure-red multiply maps red/magenta answers to (R,0,0) = the red-tinted background so
+           they fully vanish while black text stays readable. */
+        background: #ff0000;
+        mix-blend-mode: multiply;
         border-radius: 6px;
         box-shadow: 0 0 0 2px rgba(214, 51, 132, 0.55) inset;
         touch-action: none;
+      }
+      /* A plain-blend layer over the multiply-red that LIGHTENS it toward a gentle pink. The
+         answers are identical to the background after the multiply, so this uniform layer keeps
+         them hidden while softening the harsh red and keeping black text legible. */
+      .rsheet-soft {
+        position: fixed;
+        left: 0;
+        right: 0;
+        z-index: 8;
+        background: rgba(255, 255, 255, 0.45);
+        border-radius: 6px;
+        pointer-events: none;
       }
       .rsheet-grip {
         position: fixed;
