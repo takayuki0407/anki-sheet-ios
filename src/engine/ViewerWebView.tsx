@@ -28,6 +28,7 @@ export interface ViewerHandle {
   setFit(fit: "width" | "page"): void;
   setZoom(zoom: number): void;
   setSheet(on: boolean): void;
+  setManualSheet(on: boolean): void;
 }
 
 interface Props {
@@ -74,6 +75,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
       setFit: (fit) => dispatch({ cmd: "setFit", reqId: "c", fit }),
       setZoom: (zoom) => dispatch({ cmd: "setZoom", reqId: "c", zoom }),
       setSheet: (on) => dispatch({ cmd: "setSheet", reqId: "c", on }),
+      setManualSheet: (on) => dispatch({ cmd: "setManualSheet", reqId: "c", on }),
     }),
     [dispatch],
   );

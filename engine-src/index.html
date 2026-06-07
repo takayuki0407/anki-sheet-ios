@@ -94,6 +94,31 @@
       .tapzone.right {
         right: 0;
       }
+      /* Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
+         multiply keeps black text readable while red/magenta answers vanish under it. */
+      .rsheet {
+        position: fixed;
+        left: 0;
+        right: 0;
+        z-index: 8;
+        background: #ff6b6b;
+        mix-blend-mode: multiply;
+        border-radius: 4px;
+        box-shadow: 0 0 0 1.5px rgba(190, 18, 18, 0.5) inset;
+        touch-action: none;
+      }
+      .rsheet-grip {
+        position: fixed;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 72px;
+        height: 26px;
+        z-index: 9;
+        border-radius: 13px;
+        background: #e05a5a;
+        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+        touch-action: none;
+      }
     </style>
   </head>
   <body>

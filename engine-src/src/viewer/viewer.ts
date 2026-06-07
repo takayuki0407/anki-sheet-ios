@@ -88,6 +88,10 @@ export class Viewer {
   // two-finger pinch zoom (smooth: CSS transform during the gesture, real relayout on end)
   private pinch = { active: false, startDist: 1, startZoom: 1, fcx: 0, fcy: 0, scale: 1 };
   private contentEl: HTMLElement | null = null;
+  // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
+  private manualSheetEl: HTMLElement | null = null;
+  private manualGripEl: HTMLElement | null = null;
+  private band = { top: 80, height: 150 };
 
   constructor(root: HTMLElement, emit: Emit) {
     this.root = root;
@@ -539,7 +543,80 @@ export class Viewer {
     this.root.classList.toggle("sheet-off", !this.sheetOn);
   }
 
+  /** Toggle the manual red sheet — a band slid over the page (縦読み). Fixed to the viewport. */
+  setManualSheet(on: boolean): void {
+    if (on === !!this.manualSheetEl) return;
+    if (!on) {
+      this.manualSheetEl?.remove();
+      this.manualGripEl?.remove();
+      this.manualSheetEl = null;
+      this.manualGripEl = null;
+      return;
+    }
+    const sheet = document.createElement("div");
+    sheet.className = "rsheet";
+    const grip = document.createElement("div");
+    grip.className = "rsheet-grip";
+    document.body.appendChild(sheet);
+    document.body.appendChild(grip);
+    this.manualSheetEl = sheet;
+    this.manualGripEl = grip;
+    this.layoutManualSheet();
+    this.attachSheetDrag(sheet, "move");
+    this.attachSheetDrag(grip, "resize");
+  }
+
+  private layoutManualSheet(): void {
+    if (!this.manualSheetEl || !this.manualGripEl) return;
+    this.manualSheetEl.style.top = `${this.band.top}px`;
+    this.manualSheetEl.style.height = `${this.band.height}px`;
+    this.manualGripEl.style.top = `${this.band.top + this.band.height - 13}px`;
+  }
+
+  private attachSheetDrag(el: HTMLElement, mode: "move" | "resize"): void {
+    let startY = 0;
+    let startTop = 0;
+    let startH = 0;
+    let active = false;
+    el.addEventListener(
+      "touchstart",
+      (e: TouchEvent) => {
+        if (e.touches.length !== 1) return;
+        active = true;
+        startY = e.touches[0].clientY;
+        startTop = this.band.top;
+        startH = this.band.height;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      { passive: false },
+    );
+    el.addEventListener(
+      "touchmove",
+      (e: TouchEvent) => {
+        if (!active || e.touches.length !== 1) return;
+        const dy = e.touches[0].clientY - startY;
+        const vh = window.innerHeight || 1;
+        if (mode === "move") {
+          this.band.top = Math.max(0, Math.min(Math.max(0, vh - this.band.height), startTop + dy));
+        } else {
+          this.band.height = Math.max(28, Math.min(vh - this.band.top, startH + dy));
+        }
+        this.layoutManualSheet();
+        e.preventDefault();
+        e.stopPropagation();
+      },
+      { passive: false },
+    );
+    const end = () => {
+      active = false;
+    };
+    el.addEventListener("touchend", end);
+    el.addEventListener("touchcancel", end);
+  }
+
   private destroyDoc(): void {
+    this.setManualSheet(false);
     this.io?.disconnect();
     this.io = null;
     if (this.scrollRaf) {

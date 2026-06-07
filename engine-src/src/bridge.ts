@@ -165,6 +165,9 @@ const handlers: Record<string, (m: Cmd) => void> = {
   setSheet: (m) => {
     if (typeof m.on === "boolean") getViewer().setSheet(m.on);
   },
+  setManualSheet: (m) => {
+    if (typeof m.on === "boolean") getViewer().setManualSheet(m.on);
+  },
 };
 
 interface Engine {

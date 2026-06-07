@@ -53,6 +53,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [fit, setFit] = useState<FitMode>("width");
   const [zoom, setZoom] = useState(1);
   const [sheetOn, setSheetOn] = useState(true);
+  const [manualSheet, setManualSheet] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [bmOpen, setBmOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([]);
@@ -165,10 +166,20 @@ export function PageViewer({ deckId }: { deckId: number }) {
     setSheetOn(v);
     ref.current?.setSheet(v);
   };
+  const toggleManualSheet = () => {
+    const v = !manualSheet;
+    setManualSheet(v);
+    ref.current?.setManualSheet(v);
+  };
   const toggleMode = () => {
     const m: ReadMode = mode === "scroll" ? "paged" : "scroll";
     setMode(m);
     ref.current?.setMode(m);
+    // The manual sheet is 縦読み-only; drop it when switching to 横読み.
+    if (m === "paged" && manualSheet) {
+      setManualSheet(false);
+      ref.current?.setManualSheet(false);
+    }
     void updateDeck(deckId, { lastMode: m });
   };
   const setFitMode = (f: FitMode) => {
@@ -332,6 +343,9 @@ export function PageViewer({ deckId }: { deckId: number }) {
 
         <View style={styles.toolRow}>
           <Tool label="赤シート" on={sheetOn} onPress={toggleSheet} />
+          {mode === "scroll" && (
+            <Tool label="重ねシート" on={manualSheet} onPress={toggleManualSheet} />
+          )}
           <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
           <Tool label="目次" onPress={openBookmarks} />
         </View>
