@@ -58,7 +58,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revealSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const revealStateRef = useRef<{ revealed: string[]; sheetOn: boolean }>({
+  const revealStateRef = useRef<{ revealed: number[]; sheetOn: boolean }>({
     revealed: [],
     sheetOn: true,
   });
@@ -82,11 +82,11 @@ export function PageViewer({ deckId }: { deckId: number }) {
         const startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
         const startMode: ReadMode = deck.lastMode ?? "scroll";
         // Restore the red-sheet reveal state (per-rect keys + sheet on/off) from last session.
-        let savedRevealed: string[] = [];
+        let savedRevealed: number[] = [];
         let savedSheetOn = true;
         if (revealRaw) {
           try {
-            const o = JSON.parse(revealRaw) as { revealed?: string[]; sheetOn?: boolean };
+            const o = JSON.parse(revealRaw) as { revealed?: number[]; sheetOn?: boolean };
             savedRevealed = o.revealed ?? [];
             savedSheetOn = o.sheetOn ?? true;
           } catch {
@@ -140,7 +140,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
 
   // Persist the red-sheet reveal state (debounced) so reopening the book restores it.
   const persistReveal = useCallback(
-    (revealed: string[], on: boolean) => {
+    (revealed: number[], on: boolean) => {
       revealStateRef.current = { revealed, sheetOn: on };
       if (revealSaveTimer.current) clearTimeout(revealSaveTimer.current);
       revealSaveTimer.current = setTimeout(() => {

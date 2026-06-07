@@ -18,8 +18,8 @@ export interface ViewerOpenArgs {
   fit: "width" | "page";
   zoom: number;
   sheetOn: boolean;
-  /** Per-rect reveal keys to restore from the last session. */
-  revealed?: string[];
+  /** Revealed card ids to restore from the last session. */
+  revealed?: number[];
 }
 
 export interface ViewerHandle {
@@ -36,7 +36,7 @@ interface Props {
   onBookReady?: (pageCount: number, page: number) => void;
   onPageChanged?: (page: number) => void;
   onZoomChanged?: (zoom: number) => void;
-  onRevealChanged?: (revealed: string[], sheetOn: boolean) => void;
+  onRevealChanged?: (revealed: number[], sheetOn: boolean) => void;
   onError?: (msg: string) => void;
 }
 
@@ -86,7 +86,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         pageCount?: number;
         zoom?: number;
         message?: string;
-        revealed?: string[];
+        revealed?: number[];
         sheetOn?: boolean;
       };
       try {

@@ -71,6 +71,10 @@ export interface SegmentResult {
   bandPx: number;
   /** Tight rects (device px) of each contiguous in-band span within the box. */
   segments: Rect[];
+  /** Real (dark) text exists to the LEFT of the first answer span in this run. */
+  darkBefore: boolean;
+  /** Real (dark) text exists to the RIGHT of the last answer span in this run. */
+  darkAfter: boolean;
 }
 
 /**
@@ -99,6 +103,13 @@ export function sampleSegments(px: PagePixels, box: Rect, cfg: DeckColorConfig):
   const minMarkPx = Math.max(6, Math.round((box.h || 0) * 0.25)); // ...with enough ink, not antialiasing
   const darkBudget = Math.max(40, (box.h || 0) * (box.h || 0) * 0.12); // dense backup
   const maxGap = Math.max(minSegW, Math.round((box.h || 0) * 1.4));
+  // Track the x-extent of red vs real-dark columns, to tell whether there is text BEFORE the
+  // first / AFTER the last answer in this run — used to reject bogus line-wrap merges.
+  const darkColThresh = Math.max(4, Math.round((box.h || 0) * 0.2));
+  let redMinX = -1;
+  let redMaxX = -1;
+  let darkMinX = -1;
+  let darkMaxX = -1;
 
   let start = -1;
   let lastRed = -1;
@@ -150,7 +161,13 @@ export function sampleSegments(px: PagePixels, box: Rect, cfg: DeckColorConfig):
         if (y > dMaxY) dMaxY = y;
       }
     }
+    if (colDark >= darkColThresh) {
+      if (darkMinX < 0) darkMinX = x;
+      darkMaxX = x;
+    }
     if (colRed) {
+      if (redMinX < 0) redMinX = x;
+      redMaxX = x;
       if (start < 0) start = x;
       lastRed = x;
       resetGap();
@@ -167,5 +184,7 @@ export function sampleSegments(px: PagePixels, box: Rect, cfg: DeckColorConfig):
     }
   }
   close();
-  return { inkPx, bandPx, segments };
+  const darkBefore = redMinX >= 0 && darkMinX >= 0 && darkMinX < redMinX;
+  const darkAfter = redMaxX >= 0 && darkMaxX > redMaxX;
+  return { inkPx, bandPx, segments, darkBefore, darkAfter };
 }

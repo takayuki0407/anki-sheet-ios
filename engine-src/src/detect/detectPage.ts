@@ -88,6 +88,7 @@ export function detectPage(
   // mobile render scale (1.5x) matches the desktop DETECT_SCALE (2x) calibration.
   const minBand = cfg.minBandPx * (scale / DETECT_SCALE) ** 2;
   let cur: Answer | null = null;
+  let prevDarkAfter = false; // did the previous colored run have black text after its answer?
 
   for (const run of runs) {
     if (!run.str || !run.str.trim()) continue; // skip whitespace-only runs
@@ -99,21 +100,27 @@ export function detectPage(
     if (colored) {
       // Each colored span is its own piece; spans within a run are split by black text, so
       // they become distinct answers and the black between them is NOT masked.
-      for (const seg of s.segments) {
+      s.segments.forEach((seg, si) => {
         const rect = deviceToPage(seg, scale);
-        if (cur && plausibleContinuation(cur.rects[cur.rects.length - 1], rect)) {
+        // A line-wrap is a genuine continuation only if NO text sits between the two colored
+        // parts. Block the merge when there's black ink after the previous run's answer
+        // ("代物弁済[による]") or before this run's first answer ("[る]資産の譲渡").
+        const interveningText = si === 0 && (prevDarkAfter || s.darkBefore);
+        if (cur && !interveningText && plausibleContinuation(cur.rects[cur.rects.length - 1], rect)) {
           cur.rects.push(rect);
         } else {
           if (cur) answers.push(cur);
           cur = { rects: [rect], text: run.str };
         }
-      }
+      });
+      prevDarkAfter = s.darkAfter;
     } else if (s.inkPx >= 3) {
       // Real (black) ink with no colored span ends the current answer.
       if (cur) {
         answers.push(cur);
         cur = null;
       }
+      prevDarkAfter = false;
     }
     // faint / no-ink runs neither extend nor break an answer
   }

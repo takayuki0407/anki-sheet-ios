@@ -29,8 +29,8 @@ export interface OpenBookArgs {
   fit?: FitMode;
   zoom?: number;
   sheetOn?: boolean;
-  /** Per-rect reveal keys ("cardId:rectIndex") to restore from the last session. */
-  revealed?: string[];
+  /** Revealed card ids to restore from the last session (whole answer reveals together). */
+  revealed?: number[];
 }
 
 export type ViewMode = "scroll" | "paged";
@@ -61,8 +61,8 @@ export class Viewer {
   private pageH = 1;
   private aspect = 0.7;
   private byPage = new Map<number, ViewerCard[]>();
-  // Revealed per-rect keys "cardId:rectIndex" — each visible mask toggles independently.
-  private revealed = new Set<string>();
+  // Revealed card ids — the whole answer (card) reveals together.
+  private revealed = new Set<number>();
   private mode: ViewMode = "scroll";
   private fit: FitMode = "width";
   private zoom = 1;
@@ -214,33 +214,33 @@ export class Viewer {
     const fitScale = w / this.pageW;
     v.maskLayer.innerHTML = "";
     for (const c of v.cards) {
-      // Each rect is its own mask keyed "cardId:rectIndex" so different masks — including
-      // different lines of an over-merged answer — never reveal together.
-      c.rects.forEach((r, ri) => {
-        const key = `${c.id}:${ri}`;
+      // The whole answer (card) reveals together — a wrapped answer stays one card, while
+      // detection keeps genuinely separate answers as separate cards.
+      const rev = this.revealed.has(c.id);
+      for (const r of c.rects) {
         const m = document.createElement("div");
-        m.className = this.revealed.has(key) ? "vmask revealed" : "vmask";
-        m.dataset.maskKey = key;
+        m.className = rev ? "vmask revealed" : "vmask";
+        m.dataset.cardId = String(c.id);
         m.style.left = `${r.x * fitScale}px`;
         m.style.top = `${r.y * fitScale}px`;
         m.style.width = `${r.w * fitScale}px`;
         m.style.height = `${r.h * fitScale}px`;
         m.onclick = (e) => {
           e.stopPropagation();
-          this.toggleMask(key);
+          this.toggleCard(c.id);
         };
         v.maskLayer.appendChild(m);
-      });
+      }
     }
   }
 
-  private toggleMask(key: string): void {
+  private toggleCard(id: number): void {
     if (!this.sheetOn) return; // nothing to reveal when the sheet is off
-    const rev = !this.revealed.has(key);
-    if (rev) this.revealed.add(key);
-    else this.revealed.delete(key);
+    const rev = !this.revealed.has(id);
+    if (rev) this.revealed.add(id);
+    else this.revealed.delete(id);
     for (const v of this.views) {
-      v.maskLayer.querySelectorAll(`[data-mask-key="${key}"]`).forEach((n) => {
+      v.maskLayer.querySelectorAll(`[data-card-id="${id}"]`).forEach((n) => {
         (n as HTMLElement).classList.toggle("revealed", rev);
       });
     }
