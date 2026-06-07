@@ -1,32 +1,39 @@
-// Paywall — shows the RevenueCat current offering and handles purchase / restore. The
-// free-tier gate (FREE_DECK_LIMIT books) routes here when exceeded. A DEV-only local
-// unlock lets the 3-deck gate be exercised before RevenueCat products are configured.
+// Paywall — RevenueCat offering with a 7-day free trial. Shown as a hard gate (`locked`) when
+// there's no active subscription, and also reachable to upgrade. Standard = up to
+// STANDARD_DECK_LIMIT books, Pro = unlimited. A DEV-only tier switcher exercises the gates
+// before RevenueCat is wired up.
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import type { PurchasesPackage } from "react-native-purchases";
 import { useApp } from "../store/session";
-import { FREE_DECK_LIMIT, useEntitlements } from "../iap/entitlements";
+import { STANDARD_DECK_LIMIT, useEntitlements, type Tier } from "../iap/entitlements";
 import { getCurrentOffering, purchase, restore } from "../iap/purchases";
+import { useAccount } from "../auth/account";
 import { PRIVACY_URL, TERMS_URL } from "../config";
 import { colors } from "../ui/theme";
 
-export function Paywall() {
+export function Paywall({ locked = false }: { locked?: boolean }) {
   const setView = useApp((s) => s.setView);
-  const setPremium = useEntitlements((s) => s.setPremium);
+  const user = useAccount((s) => s.user);
   const [packages, setPackages] = useState<PurchasesPackage[] | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setPackages(null);
     getCurrentOffering()
       .then((o) => setPackages(o?.availablePackages ?? []))
       .catch(() => setPackages([]));
   }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const buy = useCallback(
     async (pkg: PurchasesPackage) => {
       try {
         setBusy(true);
-        if (await purchase(pkg)) setView({ name: "import" });
+        const tier = await purchase(pkg);
+        if (tier !== "none") setView({ name: "decks" });
       } catch (e) {
         Alert.alert("購入エラー", e instanceof Error ? e.message : String(e));
       } finally {
@@ -39,9 +46,9 @@ export function Paywall() {
   const onRestore = useCallback(async () => {
     try {
       setBusy(true);
-      const ok = await restore();
-      Alert.alert(ok ? "復元しました" : "復元できる購入が見つかりません");
-      if (ok) setView({ name: "decks" });
+      const tier = await restore();
+      Alert.alert(tier !== "none" ? "復元しました" : "復元できる購入が見つかりません");
+      if (tier !== "none") setView({ name: "decks" });
     } catch (e) {
       Alert.alert("復元エラー", e instanceof Error ? e.message : String(e));
     } finally {
@@ -51,21 +58,34 @@ export function Paywall() {
 
   return (
     <View style={styles.c}>
-      <Pressable onPress={() => setView({ name: "decks" })} hitSlop={10}>
-        <Text style={styles.back}>← 閉じる</Text>
-      </Pressable>
-      <View style={styles.body}>
-        <Text style={styles.title}>Anki-sheet Premium</Text>
-        <Text style={styles.lead}>
-          無料プランは本を {FREE_DECK_LIMIT} 冊まで。Premium で冊数無制限＋全機能を解放。
-        </Text>
-        <Pressable onPress={() => setView({ name: "login" })} hitSlop={6}>
-          <Text style={styles.loginLink}>すでにPremiumをお持ちの方はログイン</Text>
+      {locked ? (
+        <View style={{ height: 8 }} />
+      ) : (
+        <Pressable onPress={() => setView({ name: "decks" })} hitSlop={10}>
+          <Text style={styles.back}>← 閉じる</Text>
         </Pressable>
-        <View style={styles.features}>
-          <Text style={styles.feature}>・本（PDF）を無制限に取り込み</Text>
-          <Text style={styles.feature}>・色チューニング / 再検出</Text>
-          <Text style={styles.feature}>・全データのバックアップ</Text>
+      )}
+      <View style={styles.body}>
+        <Text style={styles.title}>Anki-sheet を始める</Text>
+        <Text style={styles.lead}>まず7日間は無料。いつでも解約できます。</Text>
+        {locked && user ? (
+          <Text style={styles.accountNote}>
+            ログイン中: {user.email ?? "Apple ID"}（有効なサブスクリプションは見つかりませんでした）
+          </Text>
+        ) : null}
+        <Pressable onPress={() => setView({ name: "login" })} hitSlop={6}>
+          <Text style={styles.loginLink}>アカウントをお持ちの方はログイン</Text>
+        </Pressable>
+
+        <View style={styles.plans}>
+          <View style={styles.plan}>
+            <Text style={styles.planName}>Standard</Text>
+            <Text style={styles.planDesc}>本を {STANDARD_DECK_LIMIT} 冊まで取り込み</Text>
+          </View>
+          <View style={[styles.plan, styles.planPro]}>
+            <Text style={styles.planName}>Pro</Text>
+            <Text style={styles.planDesc}>本を無制限に取り込み</Text>
+          </View>
         </View>
 
         {packages === null ? (
@@ -84,9 +104,14 @@ export function Paywall() {
             </Pressable>
           ))
         ) : (
-          <Text style={styles.muted}>
-            商品を読み込めませんでした。RevenueCat とApp Store Connect の設定後に表示されます。
-          </Text>
+          <View style={styles.reloadBox}>
+            <Text style={styles.muted}>
+              商品を読み込めませんでした。通信状況をご確認ください（設定直後は数分かかることがあります）。
+            </Text>
+            <Pressable onPress={load} hitSlop={8}>
+              <Text style={styles.restore}>再読み込み</Text>
+            </Pressable>
+          </View>
         )}
 
         <Pressable onPress={onRestore} disabled={busy} hitSlop={8}>
@@ -94,9 +119,9 @@ export function Paywall() {
         </Pressable>
 
         <Text style={styles.disclosure}>
-          お支払いは購入確定時にApp Storeアカウントへ請求されます。サブスクリプションは、現在の期間
-          終了の24時間前までに自動更新をオフにしない限り自動更新され、同額が請求されます。更新の管理・
-          解約はiOSの「設定」→ Apple ID →「サブスクリプション」からいつでも行えます。
+          7日間の無料トライアル付き。トライアル終了時、解約しない限り選択したプランの料金が自動で請求
+          されます。サブスクリプションは、現在の期間終了の24時間前までに自動更新をオフにしない限り自動
+          更新されます。更新の管理・解約はiOSの「設定」→ Apple ID →「サブスクリプション」から行えます。
         </Text>
         <View style={styles.legalRow}>
           <Pressable onPress={() => Linking.openURL(TERMS_URL)} hitSlop={6}>
@@ -108,17 +133,42 @@ export function Paywall() {
           </Pressable>
         </View>
 
-        {__DEV__ ? (
-          <Pressable
-            style={styles.devUnlock}
-            onPress={() => {
-              setPremium(true);
-              setView({ name: "import" });
-            }}
-          >
-            <Text style={styles.devUnlockText}>[DEV] ローカルでPremiumを解放</Text>
+        {locked ? (
+          <Pressable onPress={() => setView({ name: "info" })} hitSlop={8}>
+            <Text style={styles.helpLink}>ヘルプ・お問い合わせ・アカウント</Text>
           </Pressable>
         ) : null}
+
+        {__DEV__ ? <DevTierPanel /> : null}
+      </View>
+    </View>
+  );
+}
+
+/** DEV-only: simulate a subscription tier to exercise the gates (lock / downgrade) in Expo Go. */
+function DevTierPanel() {
+  const set = useEntitlements((s) => s.set);
+  const setView = useApp((s) => s.setView);
+  const sim = (tier: Tier, billingActive: boolean) => {
+    set({ tier, billingActive, ready: true });
+    setView({ name: "decks" });
+  };
+  return (
+    <View style={styles.dev}>
+      <Text style={styles.devLabel}>[DEV] tier 切替</Text>
+      <View style={styles.devRow}>
+        <Pressable style={styles.devBtn} onPress={() => sim("pro", true)}>
+          <Text style={styles.devBtnText}>Pro</Text>
+        </Pressable>
+        <Pressable style={styles.devBtn} onPress={() => sim("standard", true)}>
+          <Text style={styles.devBtnText}>Standard</Text>
+        </Pressable>
+        <Pressable style={styles.devBtn} onPress={() => sim("none", true)}>
+          <Text style={styles.devBtnText}>未契約</Text>
+        </Pressable>
+        <Pressable style={styles.devBtn} onPress={() => sim("none", false)}>
+          <Text style={styles.devBtnText}>解除(ungate)</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -131,8 +181,22 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: "800", color: colors.sand, textAlign: "center" },
   lead: { fontSize: 15, color: colors.text, textAlign: "center", lineHeight: 22 },
   loginLink: { color: colors.ocean, fontSize: 14, textAlign: "center" },
-  features: { gap: 6, alignSelf: "center", marginBottom: 4 },
-  feature: { fontSize: 14, color: colors.textSub },
+  accountNote: { color: colors.textSub, fontSize: 12, textAlign: "center" },
+  helpLink: { color: colors.ocean, fontSize: 13, textAlign: "center", paddingVertical: 6 },
+  reloadBox: { gap: 8 },
+  plans: { flexDirection: "row", gap: 10, marginVertical: 4 },
+  plan: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: colors.surface,
+    gap: 4,
+  },
+  planPro: { borderColor: colors.sand },
+  planName: { fontSize: 15, fontWeight: "800", color: colors.text },
+  planDesc: { fontSize: 12, color: colors.textSub, lineHeight: 18 },
   cta: { backgroundColor: colors.sand, paddingVertical: 16, borderRadius: 14, alignItems: "center" },
   disabled: { opacity: 0.6 },
   ctaText: { color: "#fff", fontSize: 16, fontWeight: "700" },
@@ -142,6 +206,16 @@ const styles = StyleSheet.create({
   legalRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 4 },
   legalLink: { color: colors.ocean, fontSize: 12 },
   legalSep: { color: colors.muted, fontSize: 12 },
-  devUnlock: { paddingVertical: 10, alignItems: "center" },
-  devUnlockText: { color: colors.muted, fontSize: 12 },
+  dev: { marginTop: 10, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, gap: 6 },
+  devLabel: { color: colors.muted, fontSize: 11, textAlign: "center" },
+  devRow: { flexDirection: "row", justifyContent: "center", gap: 6, flexWrap: "wrap" },
+  devBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  devBtnText: { color: colors.text, fontSize: 12 },
 });

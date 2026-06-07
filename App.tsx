@@ -1,10 +1,12 @@
-// Root: mounts the app-wide headless detection engine and switches between screens
-// based on the zustand view store (mirrors the original web app's single-stack model).
-import { useEffect, useState } from "react";
+// Root: mounts the app-wide headless detection engine and switches between screens based on
+// the zustand view store. A subscription Gate wraps the router: with no active subscription the
+// app is locked to the paywall, and a Standard subscriber over the book limit must trim down.
+import { useCallback, useEffect, useState } from "react";
 import { SafeAreaView, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { EngineProvider } from "./src/engine/EngineProvider";
 import { initPurchases } from "./src/iap/purchases";
+import { effectiveTier, STANDARD_DECK_LIMIT, useEntitlements } from "./src/iap/entitlements";
 import { useApp } from "./src/store/session";
 import { DeckList } from "./src/screens/DeckList";
 import { ImportWizard } from "./src/screens/ImportWizard";
@@ -13,9 +15,10 @@ import { Settings } from "./src/screens/Settings";
 import { Paywall } from "./src/screens/Paywall";
 import { Info } from "./src/screens/Info";
 import { Login } from "./src/screens/Login";
+import { DowngradeSelect } from "./src/screens/DowngradeSelect";
 import { EngineTest } from "./src/screens/EngineTest";
 import { Onboarding } from "./src/screens/Onboarding";
-import { getMeta, setMeta } from "./src/db/repo";
+import { deckCountTotal, getMeta, setMeta } from "./src/db/repo";
 import { initAuthListener } from "./src/auth/account";
 import { colors } from "./src/ui/theme";
 
@@ -41,6 +44,38 @@ function Router() {
   }
 }
 
+// Subscription gate. Renders above the router so it can't be navigated around.
+function Gate() {
+  const view = useApp((s) => s.view);
+  const decksVersion = useApp((s) => s.decksVersion);
+  const tier = useEntitlements((s) => s.tier);
+  const billingActive = useEntitlements((s) => s.billingActive);
+  const ready = useEntitlements((s) => s.ready);
+  const [deckCount, setDeckCount] = useState<number | null>(null);
+  const refreshCount = useCallback(() => deckCountTotal().then(setDeckCount), []);
+  useEffect(() => {
+    void refreshCount();
+  }, [refreshCount, tier, billingActive, view.name, decksVersion]);
+
+  const eff = effectiveTier({ tier, billingActive });
+
+  if (!ready || deckCount === null) return null; // brief splash while RC reports
+  if (eff === "none") {
+    // Locked: reachable only the paywall, login (to restore a subscription), and Info — Info
+    // must stay reachable so a logged-in user can still delete their account (Apple 5.1.1(v)).
+    if (view.name === "login") return <Login />;
+    if (view.name === "info") return <Info />;
+    return <Paywall locked />;
+  }
+  if (eff === "standard" && deckCount > STANDARD_DECK_LIMIT) {
+    if (view.name === "paywall") return <Paywall />; // upgrade-to-Pro escape
+    if (view.name === "login") return <Login />;
+    if (view.name === "info") return <Info />;
+    return <DowngradeSelect keepLimit={STANDARD_DECK_LIMIT} onResolved={refreshCount} />;
+  }
+  return <Router />;
+}
+
 export default function App() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   useEffect(() => {
@@ -60,7 +95,7 @@ export default function App() {
             }}
           />
         ) : onboarded === null ? null : (
-          <Router />
+          <Gate />
         )}
       </SafeAreaView>
     </EngineProvider>

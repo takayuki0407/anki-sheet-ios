@@ -15,9 +15,15 @@ export type View =
 interface AppState {
   view: View;
   setView: (v: View) => void;
+  // Bumped on any deck insert/delete/import so the subscription Gate re-counts deterministically
+  // (e.g. a backup-restore that pushes a Standard user over the limit triggers DowngradeSelect).
+  decksVersion: number;
+  bumpDecks: () => void;
 }
 
 export const useApp = create<AppState>((set) => ({
   view: { name: "decks" },
   setView: (view) => set({ view }),
+  decksVersion: 0,
+  bumpDecks: () => set((s) => ({ decksVersion: s.decksVersion + 1 })),
 }));

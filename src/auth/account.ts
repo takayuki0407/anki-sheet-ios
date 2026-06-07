@@ -16,6 +16,7 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import Purchases from "react-native-purchases";
 import { getFirebaseAuth, isAuthConfigured } from "./firebase";
+import { syncCustomerInfo } from "../iap/purchases";
 
 export interface AccountUser {
   uid: string;
@@ -51,11 +52,18 @@ export function initAuthListener(): void {
       user: u ? { uid: u.uid, email: u.email } : null,
       ready: true,
     });
-    // Tie the RevenueCat user to the Firebase uid so entitlements sync across platforms.
+    // Tie the RevenueCat user to the Firebase uid so entitlements sync across platforms, and
+    // apply the returned CustomerInfo immediately (don't rely on the async listener) so the gate
+    // can't briefly lock a subscriber out on logout or miss a web entitlement on login.
     (async () => {
       try {
-        if (u) await Purchases.logIn(u.uid);
-        else await Purchases.logOut();
+        if (u) {
+          const { customerInfo } = await Purchases.logIn(u.uid);
+          syncCustomerInfo(customerInfo);
+        } else {
+          const customerInfo = await Purchases.logOut();
+          syncCustomerInfo(customerInfo);
+        }
       } catch {
         /* RevenueCat not configured yet */
       }

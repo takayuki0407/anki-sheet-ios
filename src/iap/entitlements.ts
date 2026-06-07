@@ -1,22 +1,47 @@
-// Premium entitlement + free-tier gate. The actual purchase state is wired to
-// RevenueCat in M5 (setPremium is called from the purchases listener); until then it
-// defaults to free so the gate is exercised. Free users may keep up to FREE_DECK_LIMIT
-// books; Premium unlocks unlimited.
+// Subscription tier + book-count gate. Three states:
+//   pro      – unlimited books
+//   standard – up to STANDARD_DECK_LIMIT books
+//   none     – no active subscription (e.g. after the 7-day trial) -> locked behind the paywall
+// `setTier`/`billingActive` are driven by the RevenueCat listener (see iap/purchases.ts).
 import { create } from "zustand";
 
-export const FREE_DECK_LIMIT = 3;
+export type Tier = "none" | "standard" | "pro";
+
+export const STANDARD_DECK_LIMIT = 3;
 
 interface EntitlementState {
-  isPremium: boolean;
-  setPremium: (v: boolean) => void;
+  tier: Tier;
+  // True once RevenueCat is configured and reporting. When false (Expo Go, placeholder key,
+  // or a transient RC error) the app is intentionally UNGATED so it stays usable and
+  // dev-testable — the gates below then behave as full "pro" access (fail-open).
+  billingActive: boolean;
+  ready: boolean; // RC has reported once, or we determined it isn't configured
+  set: (p: Partial<EntitlementState>) => void;
 }
 
 export const useEntitlements = create<EntitlementState>((set) => ({
-  isPremium: false,
-  setPremium: (isPremium) => set({ isPremium }),
+  tier: "none",
+  billingActive: false,
+  ready: false,
+  set: (p) => set(p),
 }));
 
-/** Whether another deck may be added given the current count and premium status. */
-export function canAddDeck(currentCount: number, isPremium: boolean): boolean {
-  return isPremium || currentCount < FREE_DECK_LIMIT;
+/** Tier used for gating: ungated environments behave as "pro" so dev/Expo Go isn't locked out. */
+export function effectiveTier(s: { tier: Tier; billingActive: boolean }): Tier {
+  return s.billingActive ? s.tier : "pro";
+}
+
+/** Hook: the effective (gating) tier. */
+export function useEffectiveTier(): Tier {
+  return useEntitlements((s) => effectiveTier(s));
+}
+
+/** Max books for a tier (Infinity for pro / ungated). */
+export function deckLimit(tier: Tier): number {
+  return tier === "pro" ? Infinity : tier === "standard" ? STANDARD_DECK_LIMIT : 0;
+}
+
+/** Whether another deck may be added given the current count and (effective) tier. */
+export function canAddDeck(currentCount: number, tier: Tier): boolean {
+  return currentCount < deckLimit(tier);
 }

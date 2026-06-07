@@ -82,8 +82,9 @@ npx expo start --dev-client               # QRをDev Clientで読む
    npx eas-cli env:create --name EXPO_PUBLIC_RC_IOS_KEY --value appl_xxx --environment production
    ```
 4. **検証**: TestFlight のサンドボックスで購入→Premium解放、「購入を復元」を確認。
-   - 無料は本 3 冊まで（`FREE_DECK_LIMIT`）。4冊目でペイウォールへ。
-   - 開発中は ペイウォールの `[DEV] ローカルでPremium解放` で 3冊ゲートを試験可能。
+   - サブスク制: 7日無料トライアル → Standard(本 `STANDARD_DECK_LIMIT`=3 冊) / Pro(無制限)。
+     未契約はペイウォールでロック。Standard で上限超過時は残す3冊を選んで削除。
+   - 開発中は ペイウォールの `[DEV] tier 切替`（Pro/Standard/未契約/解除）でゲートを試験可能。
 
 ## 3. App Store へ公開（Windowsから）
 

@@ -1,6 +1,6 @@
 // Login / sign-up. Sign in with Apple (native; works on a dev build / TestFlight, hidden
 // in Expo Go where it's unavailable) + email/password (works in Expo Go once Firebase is
-// configured). Logging in syncs the web-purchased Premium entitlement to this device.
+// configured). Logging in syncs the account's subscription entitlement to this device.
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -71,7 +71,7 @@ export function Login() {
       <View style={styles.body}>
         <Text style={styles.title}>ログイン</Text>
         <Text style={styles.lead}>
-          ログインすると、web版で購入したPremiumをこの端末でも使えます。
+          ログインすると、ご利用中のサブスクリプションをこの端末に反映できます。
         </Text>
 
         {!isAuthConfigured ? (

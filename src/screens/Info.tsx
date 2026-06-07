@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import * as StoreReview from "expo-store-review";
 import { useApp } from "../store/session";
-import { FREE_DECK_LIMIT, useEntitlements } from "../iap/entitlements";
+import { STANDARD_DECK_LIMIT, effectiveTier, useEntitlements } from "../iap/entitlements";
 import { deckCountTotal } from "../db/repo";
 import { restore } from "../iap/purchases";
 import { deleteAccount, signOut, useAccount } from "../auth/account";
@@ -80,7 +80,9 @@ function Help({ q, a }: { q: string; a: string }) {
 
 export function Info() {
   const setView = useApp((s) => s.setView);
-  const isPremium = useEntitlements((s) => s.isPremium);
+  const tier = useEntitlements((s) => s.tier);
+  const billingActive = useEntitlements((s) => s.billingActive);
+  const eff = effectiveTier({ tier, billingActive });
   const user = useAccount((s) => s.user);
   const [deckCount, setDeckCount] = useState<number | null>(null);
   const [showLicenses, setShowLicenses] = useState(false);
@@ -114,8 +116,8 @@ export function Info() {
 
   const doRestore = useCallback(async () => {
     try {
-      const ok = await restore();
-      Alert.alert(ok ? "復元しました" : "復元できる購入が見つかりません");
+      const tier = await restore();
+      Alert.alert(tier !== "none" ? "復元しました" : "復元できる購入が見つかりません");
     } catch (e) {
       Alert.alert("エラー", e instanceof Error ? e.message : String(e));
     }
@@ -192,10 +194,16 @@ export function Info() {
         <Section title="プラン">
           <Row
             label="現在のプラン"
-            value={isPremium ? "Premium" : `無料（本 ${deckCount ?? "…"} / ${FREE_DECK_LIMIT} 冊）`}
+            value={
+              eff === "pro"
+                ? "Pro（無制限）"
+                : eff === "standard"
+                  ? `Standard（本 ${deckCount ?? "…"} / ${STANDARD_DECK_LIMIT} 冊）`
+                  : "未契約"
+            }
           />
-          {!isPremium ? (
-            <Row label="Premium にアップグレード" onPress={() => setView({ name: "paywall" })} />
+          {eff !== "pro" ? (
+            <Row label="プランをアップグレード" onPress={() => setView({ name: "paywall" })} />
           ) : null}
           <Row
             label="サブスクリプションを管理"
@@ -231,6 +239,7 @@ export function Info() {
 
         {__DEV__ ? (
           <Section title="開発">
+            <Row label="ペイウォール (dev)" onPress={() => setView({ name: "paywall" })} />
             <Row label="エンジン検証 (M0)" onPress={() => setView({ name: "engineTest" })} />
           </Section>
         ) : null}

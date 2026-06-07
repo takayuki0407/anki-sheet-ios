@@ -1,7 +1,7 @@
-// RevenueCat integration. Configures the SDK lazily, keeps the `premium` entitlement
-// synced into the entitlements store, and exposes purchase/restore for the paywall. The
-// product catalog + entitlement are configured in App Store Connect + the RevenueCat
-// dashboard; set the public SDK key via EXPO_PUBLIC_RC_IOS_KEY (or replace the placeholder).
+// RevenueCat integration. Configures the SDK lazily, keeps the subscription tier (pro /
+// standard / none) synced into the entitlements store, and exposes purchase/restore for the
+// paywall. Products + entitlements ("pro", "standard") are configured in App Store Connect +
+// the RevenueCat dashboard; set the public SDK key via EXPO_PUBLIC_RC_IOS_KEY.
 import { Platform } from "react-native";
 import Purchases, {
   LOG_LEVEL,
@@ -9,9 +9,10 @@ import Purchases, {
   type PurchasesOffering,
   type PurchasesPackage,
 } from "react-native-purchases";
-import { useEntitlements } from "./entitlements";
+import { useEntitlements, type Tier } from "./entitlements";
 
-export const ENTITLEMENT_ID = "premium";
+// Entitlement identifiers as configured in RevenueCat. "pro" outranks "standard".
+export const ENTITLEMENTS = { pro: "pro", standard: "standard" } as const;
 
 const RC_KEYS = {
   ios: process.env.EXPO_PUBLIC_RC_IOS_KEY ?? "appl_REPLACE_WITH_YOUR_IOS_KEY",
@@ -20,27 +21,57 @@ const RC_KEYS = {
 
 let ready = false;
 
-function applyEntitlement(info: CustomerInfo): void {
-  useEntitlements.getState().setPremium(!!info.entitlements.active[ENTITLEMENT_ID]);
+function tierOf(info: CustomerInfo): Tier {
+  const active = info.entitlements.active;
+  if (active[ENTITLEMENTS.pro]) return "pro";
+  if (active[ENTITLEMENTS.standard]) return "standard";
+  return "none";
+}
+
+/** Apply a RevenueCat CustomerInfo snapshot to the entitlement store (tier + billingActive). */
+export function syncCustomerInfo(info: CustomerInfo): void {
+  useEntitlements.getState().set({ tier: tierOf(info), billingActive: true, ready: true });
+}
+
+/** Mark billing unavailable but ready, so the app runs UNGATED (Expo Go / missing key). */
+function markUngated(): void {
+  useEntitlements.getState().set({ billingActive: false, ready: true });
 }
 
 /**
- * Configure RevenueCat once and start syncing the premium entitlement. Returns false (and
- * leaves the app on the free tier) when the key is a placeholder or the native module is
- * absent (Expo Go / web). Safe to call repeatedly — every IAP entry point awaits it.
+ * Configure RevenueCat once and start syncing the subscription tier. Safe to call repeatedly —
+ * every IAP entry point awaits it. Returns true once configured.
+ *
+ * Failure handling is split so a transient outage on a configured build can't hand out Pro:
+ *  - placeholder key OR native module absent (Expo Go) -> UNGATE (app fully usable for dev)
+ *  - configured but the first fetch fails (e.g. first launch offline) -> FAIL CLOSED (locked);
+ *    the update listener recovers the real tier once the network returns.
  */
 export async function initPurchases(): Promise<boolean> {
   if (ready) return true;
+  const apiKey = Platform.OS === "android" ? RC_KEYS.android : RC_KEYS.ios;
+  if (apiKey.includes("REPLACE_WITH")) {
+    markUngated();
+    return false; // not configured yet
+  }
+  // configure() needs no network; if it throws, the native module is absent (Expo Go with a
+  // real key) — ungate rather than lock the dev build out.
   try {
-    const apiKey = Platform.OS === "android" ? RC_KEYS.android : RC_KEYS.ios;
-    if (apiKey.includes("REPLACE_WITH")) return false; // not configured yet
     if (__DEV__) Purchases.setLogLevel(LOG_LEVEL.WARN);
     Purchases.configure({ apiKey });
-    Purchases.addCustomerInfoUpdateListener(applyEntitlement);
-    applyEntitlement(await Purchases.getCustomerInfo());
+    Purchases.addCustomerInfoUpdateListener(syncCustomerInfo);
+  } catch {
+    markUngated();
+    return false;
+  }
+  // SDK is configured. A failed first fetch must NOT grant access (closes the "kill the network
+  // to get free Pro" hole) — lock until the listener delivers the real entitlements.
+  try {
+    syncCustomerInfo(await Purchases.getCustomerInfo());
     ready = true;
     return true;
   } catch {
+    useEntitlements.getState().set({ tier: "none", billingActive: true, ready: true });
     return false;
   }
 }
@@ -55,27 +86,23 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
   }
 }
 
-/** Purchase a package. Returns true if premium was granted; false if the user cancelled. */
-export async function purchase(pkg: PurchasesPackage): Promise<boolean> {
+/** Purchase a package. Returns the resulting tier ("none" if cancelled or not granted). */
+export async function purchase(pkg: PurchasesPackage): Promise<Tier> {
   if (!(await initPurchases())) throw new Error("購入を利用できません（設定が必要です）");
   try {
     const { customerInfo } = await Purchases.purchasePackage(pkg);
-    applyEntitlement(customerInfo);
-    return !!customerInfo.entitlements.active[ENTITLEMENT_ID];
+    syncCustomerInfo(customerInfo);
+    return tierOf(customerInfo);
   } catch (e) {
-    if ((e as { userCancelled?: boolean }).userCancelled) return false;
+    if ((e as { userCancelled?: boolean }).userCancelled) return "none";
     throw e;
   }
 }
 
-export async function restore(): Promise<boolean> {
-  if (!(await initPurchases())) return false;
-  try {
-    const info = await Purchases.restorePurchases();
-    applyEntitlement(info);
-    return !!info.entitlements.active[ENTITLEMENT_ID];
-  } catch (e) {
-    if ((e as { userCancelled?: boolean }).userCancelled) return false;
-    throw e;
-  }
+/** Restore purchases. Returns the resulting tier ("none" if nothing to restore). */
+export async function restore(): Promise<Tier> {
+  if (!(await initPurchases())) return "none";
+  const info = await Purchases.restorePurchases();
+  syncCustomerInfo(info);
+  return tierOf(info);
 }

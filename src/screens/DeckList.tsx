@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useApp } from "../store/session";
-import { canAddDeck, useEntitlements } from "../iap/entitlements";
+import { canAddDeck, useEffectiveTier } from "../iap/entitlements";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import { deckPdfFile } from "../db/files";
 import * as Sharing from "expo-sharing";
@@ -43,7 +43,8 @@ const isViewMode = (v: unknown): v is ViewMode =>
 
 export function DeckList() {
   const setView = useApp((s) => s.setView);
-  const isPremium = useEntitlements((s) => s.isPremium);
+  const bumpDecks = useApp((s) => s.bumpDecks);
+  const tier = useEffectiveTier();
   const engine = useDetectionEngine();
   const [items, setItems] = useState<DeckVM[] | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("l");
@@ -100,12 +101,12 @@ export function DeckList() {
 
   const onImport = useCallback(async () => {
     const n = await deckCountTotal();
-    if (!canAddDeck(n, isPremium)) {
+    if (!canAddDeck(n, tier)) {
       setView({ name: "paywall" });
       return;
     }
     setView({ name: "import" });
-  }, [isPremium, setView]);
+  }, [tier, setView]);
 
   const pickView = useCallback(() => {
     Alert.alert("表示方法", undefined, [
@@ -148,6 +149,7 @@ export function DeckList() {
             });
             if (res.canceled || !res.assets?.[0]) return;
             await importBackup(res.assets[0].uri);
+            bumpDecks();
             load();
             Alert.alert("読み込み完了", "バックアップを復元しました。");
           } catch (e) {
@@ -168,6 +170,7 @@ export function DeckList() {
           style: "destructive",
           onPress: async () => {
             await deleteDeck(deck.id);
+            bumpDecks();
             load();
           },
         },
