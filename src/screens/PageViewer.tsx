@@ -22,8 +22,10 @@ import {
   firstAnswerPage,
   getDeck,
   getDeckPdf,
+  getMeta,
   listBookmarks,
   renameBookmark,
+  setMeta,
   updateDeck,
 } from "../db/repo";
 import type { BookmarkRow, ReadMode } from "../db/rows";
@@ -55,16 +57,22 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [bmOpen, setBmOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealStateRef = useRef<{ revealed: string[]; sheetOn: boolean }>({
+    revealed: [],
+    sheetOn: true,
+  });
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [uri, deck, pdf, cards] = await Promise.all([
+        const [uri, deck, pdf, cards, revealRaw] = await Promise.all([
           ensureEngine(),
           getDeck(deckId),
           getDeckPdf(deckId),
           deckCards(deckId),
+          getMeta(`reveal:${deckId}`),
         ]);
         if (!alive) return;
         if (!deck || !pdf) {
@@ -73,6 +81,19 @@ export function PageViewer({ deckId }: { deckId: number }) {
         }
         const startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
         const startMode: ReadMode = deck.lastMode ?? "scroll";
+        // Restore the red-sheet reveal state (per-rect keys + sheet on/off) from last session.
+        let savedRevealed: string[] = [];
+        let savedSheetOn = true;
+        if (revealRaw) {
+          try {
+            const o = JSON.parse(revealRaw) as { revealed?: string[]; sheetOn?: boolean };
+            savedRevealed = o.revealed ?? [];
+            savedSheetOn = o.sheetOn ?? true;
+          } catch {
+            /* ignore corrupt reveal state */
+          }
+        }
+        revealStateRef.current = { revealed: savedRevealed, sheetOn: savedSheetOn };
         const cardsUrl = stageJson(
           cards.map((c) => ({ id: c.id, pageIndex: c.pageIndex, rects: c.rects })),
           `viewer-cards-${deckId}.json`,
@@ -80,6 +101,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
         setName(deck.name);
         setPage(startPage);
         setMode(startMode);
+        setSheetOn(savedSheetOn);
         setPageCount(pdf.pageCount);
         setEngineUri(uri);
         setOpenArgs({
@@ -92,7 +114,8 @@ export function PageViewer({ deckId }: { deckId: number }) {
           page: startPage,
           fit: "width",
           zoom: 1,
-          sheetOn: true,
+          sheetOn: savedSheetOn,
+          revealed: savedRevealed,
         });
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
@@ -101,6 +124,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
     return () => {
       alive = false;
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (revealSaveTimer.current) clearTimeout(revealSaveTimer.current);
     };
   }, [deckId]);
 
@@ -109,6 +133,18 @@ export function PageViewer({ deckId }: { deckId: number }) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         void updateDeck(deckId, patch);
+      }, 400);
+    },
+    [deckId],
+  );
+
+  // Persist the red-sheet reveal state (debounced) so reopening the book restores it.
+  const persistReveal = useCallback(
+    (revealed: string[], on: boolean) => {
+      revealStateRef.current = { revealed, sheetOn: on };
+      if (revealSaveTimer.current) clearTimeout(revealSaveTimer.current);
+      revealSaveTimer.current = setTimeout(() => {
+        void setMeta(`reveal:${deckId}`, JSON.stringify(revealStateRef.current));
       }, 400);
     },
     [deckId],
@@ -147,6 +183,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
 
   const back = useCallback(() => {
     void updateDeck(deckId, { lastPage: page, lastMode: mode });
+    void setMeta(`reveal:${deckId}`, JSON.stringify(revealStateRef.current));
     setView({ name: "decks" });
   }, [deckId, page, mode, setView]);
 
@@ -235,6 +272,10 @@ export function PageViewer({ deckId }: { deckId: number }) {
             }}
             onPageChanged={onPageChanged}
             onZoomChanged={setZoom}
+            onRevealChanged={(revealed, on) => {
+              setSheetOn(on);
+              persistReveal(revealed, on);
+            }}
             onError={(m) => setErr(m)}
           />
         ) : (

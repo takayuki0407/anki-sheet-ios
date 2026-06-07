@@ -29,6 +29,8 @@ export interface OpenBookArgs {
   fit?: FitMode;
   zoom?: number;
   sheetOn?: boolean;
+  /** Per-rect reveal keys ("cardId:rectIndex") to restore from the last session. */
+  revealed?: string[];
 }
 
 export type ViewMode = "scroll" | "paged";
@@ -59,7 +61,8 @@ export class Viewer {
   private pageH = 1;
   private aspect = 0.7;
   private byPage = new Map<number, ViewerCard[]>();
-  private revealed = new Set<number>();
+  // Revealed per-rect keys "cardId:rectIndex" — each visible mask toggles independently.
+  private revealed = new Set<string>();
   private mode: ViewMode = "scroll";
   private fit: FitMode = "width";
   private zoom = 1;
@@ -109,7 +112,7 @@ export class Viewer {
     this.fit = a.fit ?? "width";
     this.zoom = a.zoom ?? 1;
     this.sheetOn = a.sheetOn ?? true;
-    this.revealed.clear();
+    this.revealed = new Set(a.revealed ?? []); // restore last session's reveal state
     this.current = clamp(a.page ?? 0, 0, this.pageCount - 1);
 
     let cards: ViewerCard[] = [];
@@ -211,34 +214,42 @@ export class Viewer {
     const fitScale = w / this.pageW;
     v.maskLayer.innerHTML = "";
     for (const c of v.cards) {
-      const rev = this.revealed.has(c.id);
-      for (const r of c.rects) {
+      // Each rect is its own mask keyed "cardId:rectIndex" so different masks — including
+      // different lines of an over-merged answer — never reveal together.
+      c.rects.forEach((r, ri) => {
+        const key = `${c.id}:${ri}`;
         const m = document.createElement("div");
-        m.className = rev ? "vmask revealed" : "vmask";
-        m.dataset.cardId = String(c.id);
+        m.className = this.revealed.has(key) ? "vmask revealed" : "vmask";
+        m.dataset.maskKey = key;
         m.style.left = `${r.x * fitScale}px`;
         m.style.top = `${r.y * fitScale}px`;
         m.style.width = `${r.w * fitScale}px`;
         m.style.height = `${r.h * fitScale}px`;
         m.onclick = (e) => {
           e.stopPropagation();
-          this.toggleCard(c.id);
+          this.toggleMask(key);
         };
         v.maskLayer.appendChild(m);
-      }
+      });
     }
   }
 
-  private toggleCard(id: number): void {
+  private toggleMask(key: string): void {
     if (!this.sheetOn) return; // nothing to reveal when the sheet is off
-    const rev = !this.revealed.has(id);
-    if (rev) this.revealed.add(id);
-    else this.revealed.delete(id);
+    const rev = !this.revealed.has(key);
+    if (rev) this.revealed.add(key);
+    else this.revealed.delete(key);
     for (const v of this.views) {
-      v.maskLayer.querySelectorAll(`[data-card-id="${id}"]`).forEach((n) => {
+      v.maskLayer.querySelectorAll(`[data-mask-key="${key}"]`).forEach((n) => {
         (n as HTMLElement).classList.toggle("revealed", rev);
       });
     }
+    this.emitReveal();
+  }
+
+  /** Report the current reveal state so the native screen can persist it across sessions. */
+  private emitReveal(): void {
+    this.emit({ type: "reveal-changed", revealed: [...this.revealed], sheetOn: this.sheetOn });
   }
 
   private async renderView(v: PageView, index: number): Promise<void> {
@@ -521,6 +532,7 @@ export class Viewer {
     this.applySheetClass();
     const w = this.cssW();
     for (const v of this.views) this.layoutMasks(v, w);
+    this.emitReveal();
   }
 
   private applySheetClass(): void {

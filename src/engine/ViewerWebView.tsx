@@ -18,6 +18,8 @@ export interface ViewerOpenArgs {
   fit: "width" | "page";
   zoom: number;
   sheetOn: boolean;
+  /** Per-rect reveal keys to restore from the last session. */
+  revealed?: string[];
 }
 
 export interface ViewerHandle {
@@ -34,11 +36,12 @@ interface Props {
   onBookReady?: (pageCount: number, page: number) => void;
   onPageChanged?: (page: number) => void;
   onZoomChanged?: (zoom: number) => void;
+  onRevealChanged?: (revealed: string[], sheetOn: boolean) => void;
   onError?: (msg: string) => void;
 }
 
 export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebView(
-  { engineUri, open, onBookReady, onPageChanged, onZoomChanged, onError },
+  { engineUri, open, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onError },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -77,7 +80,15 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
 
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
-      let m: { type?: string; page?: number; pageCount?: number; zoom?: number; message?: string };
+      let m: {
+        type?: string;
+        page?: number;
+        pageCount?: number;
+        zoom?: number;
+        message?: string;
+        revealed?: string[];
+        sheetOn?: boolean;
+      };
       try {
         m = JSON.parse(e.nativeEvent.data);
       } catch {
@@ -97,12 +108,15 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         case "zoom-changed":
           onZoomChanged?.(m.zoom ?? 1);
           break;
+        case "reveal-changed":
+          onRevealChanged?.(m.revealed ?? [], m.sheetOn ?? true);
+          break;
         case "error":
           onError?.(String(m.message ?? "engine error"));
           break;
       }
     },
-    [sendOpen, onBookReady, onPageChanged, onZoomChanged, onError],
+    [sendOpen, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onError],
   );
 
   return (
