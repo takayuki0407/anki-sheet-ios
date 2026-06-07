@@ -28,10 +28,35 @@ import {
   setMeta,
   updateDeck,
 } from "../db/repo";
-import type { BookmarkRow, ReadMode } from "../db/rows";
+import type { BookmarkRow, CardRow, ReadMode } from "../db/rows";
+import { getProgress, idToken, putProgress } from "../sync/api";
+import { deckBookId } from "../sync/deck";
 import { colors } from "../ui/theme";
 
 type FitMode = "width" | "page";
+
+/** Device-portable reveal keys (pageIndex:ordinal, ordinal = position-sorted index on the page) —
+ * identical across devices for the same detected book, so revealed answers map despite local ids. */
+function cardKeyMaps(cards: CardRow[]) {
+  const byPage = new Map<number, CardRow[]>();
+  for (const c of cards) {
+    const arr = byPage.get(c.pageIndex) ?? [];
+    arr.push(c);
+    byPage.set(c.pageIndex, arr);
+  }
+  const idToKey = new Map<number, string>();
+  const keyToId = new Map<string, number>();
+  for (const [page, list] of byPage) {
+    [...list]
+      .sort((a, b) => a.answerRect.y - b.answerRect.y || a.answerRect.x - b.answerRect.x)
+      .forEach((c, i) => {
+        const key = `${page}:${i}`;
+        idToKey.set(c.id, key);
+        keyToId.set(key, c.id);
+      });
+  }
+  return { idToKey, keyToId };
+}
 
 function Tool({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) {
   return (
@@ -63,6 +88,13 @@ export function PageViewer({ deckId }: { deckId: number }) {
     redMode: "mask" | "sheet" | "off";
     band: { top: number; height: number };
   }>({ revealed: [], redMode: "mask", band: { top: 80, height: 150 } });
+  // Cross-device progress sync (Pro): bookId + cards (for reveal keys) + last-write-wins timestamp,
+  // and a live mirror of page/mode for the debounced push.
+  const bookIdRef = useRef<string | undefined>(undefined);
+  const cardsRef = useRef<CardRow[]>([]);
+  const progressAtRef = useRef(0);
+  const pmRef = useRef<{ page: number; mode: ReadMode }>({ page: 0, mode: "scroll" });
+  const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -80,8 +112,8 @@ export function PageViewer({ deckId }: { deckId: number }) {
           setErr("デッキが見つかりません");
           return;
         }
-        const startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
-        const startMode: ReadMode = deck.lastMode ?? "scroll";
+        let startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
+        let startMode: ReadMode = deck.lastMode ?? "scroll";
         // Restore the red overlay (mode + reveals + band) from last session.
         let savedRevealed: number[] = [];
         let savedMode: "mask" | "sheet" | "off" = "mask";
@@ -101,7 +133,37 @@ export function PageViewer({ deckId }: { deckId: number }) {
             /* ignore corrupt state */
           }
         }
+        cardsRef.current = cards;
+        bookIdRef.current = await deckBookId(deckId);
+        progressAtRef.current = Number(await getMeta(`progressAt:${deckId}`)) || 0;
+        // Pro cross-device progress: if the cloud copy is newer, resume from it (position / mode /
+        // red-sheet / revealed). Fail-open: signed-out or offline just keeps the local state.
+        if (bookIdRef.current && (await idToken())) {
+          const cloud = await getProgress(bookIdRef.current).catch(() => null);
+          if (alive && cloud && cloud.updatedAt > progressAtRef.current) {
+            const c = cloud.data;
+            if (typeof c.lastPage === "number")
+              startPage = Math.max(0, Math.min(pdf.pageCount - 1, c.lastPage));
+            if (c.lastMode) startMode = c.lastMode;
+            if (c.redMode) savedMode = c.redMode;
+            if (c.sheetBand) savedBand = c.sheetBand;
+            if (c.revealedKeys) {
+              const { keyToId } = cardKeyMaps(cards);
+              savedRevealed = c.revealedKeys
+                .map((k) => keyToId.get(k))
+                .filter((x): x is number => x != null);
+            }
+            progressAtRef.current = cloud.updatedAt;
+            void updateDeck(deckId, { lastPage: startPage, lastMode: startMode });
+            void setMeta(
+              `reveal:${deckId}`,
+              JSON.stringify({ revealed: savedRevealed, redMode: savedMode, band: savedBand }),
+            );
+            void setMeta(`progressAt:${deckId}`, String(cloud.updatedAt));
+          }
+        }
         revealStateRef.current = { revealed: savedRevealed, redMode: savedMode, band: savedBand };
+        pmRef.current = { page: startPage, mode: startMode };
         const cardsUrl = stageJson(
           cards.map((c) => ({ id: c.id, pageIndex: c.pageIndex, rects: c.rects })),
           `viewer-cards-${deckId}.json`,
@@ -135,7 +197,32 @@ export function PageViewer({ deckId }: { deckId: number }) {
       alive = false;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (revealSaveTimer.current) clearTimeout(revealSaveTimer.current);
+      if (pushTimer.current) clearTimeout(pushTimer.current);
     };
+  }, [deckId]);
+
+  // Pro cross-device progress push (debounced, best-effort, fail-open). Reads the latest values
+  // from refs so the delayed callback isn't stale; revealed is sent as portable keys.
+  const pushProgress = useCallback(() => {
+    if (!bookIdRef.current) return;
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    pushTimer.current = setTimeout(async () => {
+      if (!(await idToken())) return;
+      const { idToKey } = cardKeyMaps(cardsRef.current);
+      const revealedKeys = revealStateRef.current.revealed
+        .map((i) => idToKey.get(i))
+        .filter((x): x is string => !!x);
+      const at = Date.now();
+      progressAtRef.current = at;
+      void setMeta(`progressAt:${deckId}`, String(at));
+      void putProgress(bookIdRef.current!, {
+        lastPage: pmRef.current.page,
+        lastMode: pmRef.current.mode,
+        redMode: revealStateRef.current.redMode,
+        sheetBand: revealStateRef.current.band,
+        revealedKeys,
+      }).catch(() => {});
+    }, 1600);
   }, [deckId]);
 
   const persist = useCallback(
@@ -144,8 +231,9 @@ export function PageViewer({ deckId }: { deckId: number }) {
       saveTimer.current = setTimeout(() => {
         void updateDeck(deckId, patch);
       }, 400);
+      pushProgress();
     },
-    [deckId],
+    [deckId, pushProgress],
   );
 
   // Persist the red overlay state (debounced) so reopening the book restores it.
@@ -154,11 +242,13 @@ export function PageViewer({ deckId }: { deckId: number }) {
     revealSaveTimer.current = setTimeout(() => {
       void setMeta(`reveal:${deckId}`, JSON.stringify(revealStateRef.current));
     }, 400);
-  }, [deckId]);
+    pushProgress();
+  }, [deckId, pushProgress]);
 
   const onPageChanged = useCallback(
     (p: number) => {
       setPage(p);
+      pmRef.current.page = p;
       persist({ lastPage: p });
     },
     [persist],
@@ -180,10 +270,12 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const toggleMode = () => {
     const m: ReadMode = mode === "scroll" ? "paged" : "scroll";
     setMode(m);
+    pmRef.current.mode = m;
     ref.current?.setMode(m);
     // 赤シート is 縦読み-only: show the band only in scroll + sheet mode (redMode preserved).
     ref.current?.setManualSheet(m === "scroll" && redMode === "sheet");
     void updateDeck(deckId, { lastMode: m });
+    pushProgress();
   };
   const setFitMode = (f: FitMode) => {
     setFit(f);
@@ -198,6 +290,23 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const back = useCallback(() => {
     void updateDeck(deckId, { lastPage: page, lastMode: mode });
     void setMeta(`reveal:${deckId}`, JSON.stringify(revealStateRef.current));
+    // Best-effort immediate progress push so the latest state syncs even though we're leaving.
+    if (bookIdRef.current) {
+      void (async () => {
+        if (!(await idToken())) return;
+        const { idToKey } = cardKeyMaps(cardsRef.current);
+        void setMeta(`progressAt:${deckId}`, String(Date.now()));
+        void putProgress(bookIdRef.current!, {
+          lastPage: page,
+          lastMode: mode,
+          redMode: revealStateRef.current.redMode,
+          sheetBand: revealStateRef.current.band,
+          revealedKeys: revealStateRef.current.revealed
+            .map((i) => idToKey.get(i))
+            .filter((x): x is string => !!x),
+        }).catch(() => {});
+      })();
+    }
     setView({ name: "decks" });
   }, [deckId, page, mode, setView]);
 
