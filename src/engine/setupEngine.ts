@@ -72,11 +72,25 @@ export async function ensureEngine(): Promise<string> {
  * Copy a picked PDF into the document directory (the WebView's read-access scope) so the
  * engine can load it by file:// URL. Returns that URL. Replaces any previous import.pdf.
  */
-export async function stagePdf(srcUri: string, name = "import.pdf"): Promise<string> {
+let lastStagedUri: string | null = null;
+
+export async function stagePdf(srcUri: string, name = `import-${Date.now()}.pdf`): Promise<string> {
+  // A UNIQUE name per import is important: the WebView XHR caches a file:// URL, so reusing
+  // a fixed "import.pdf" makes a second, different import read the first file from cache.
+  // Also delete the previous staged file so canceled imports don't accumulate.
+  if (lastStagedUri) {
+    try {
+      const prev = new File(lastStagedUri);
+      if (prev.exists) prev.delete();
+    } catch {
+      /* ignore */
+    }
+  }
   const dest = new File(Paths.document, name);
   if (dest.exists) dest.delete();
   // Awaited so the file is on disk before the engine reads the returned URI.
   await new File(srcUri).copy(dest);
+  lastStagedUri = dest.uri;
   return dest.uri;
 }
 
