@@ -22,6 +22,11 @@ import { colors } from "../ui/theme";
 
 type Phase = "idle" | "detecting" | "review" | "error";
 
+// Per-file size cap (Pro cloud sync is bounded to 5GB total; a 100MB/file ceiling keeps any
+// single book reasonable for storage + on-device memory during detection).
+const MAX_PDF_MB = 100;
+const MAX_PDF_BYTES = MAX_PDF_MB * 1024 * 1024;
+
 function colorForPreset(key: string): DeckColorConfig {
   const p = COLOR_PRESETS.find((x) => x.key === key);
   return p ? { ...DEFAULT_MAGENTA_BAND, hueTarget: p.hueTarget, hueTol: p.hueTol } : DEFAULT_MAGENTA_BAND;
@@ -90,6 +95,13 @@ export function ImportWizard() {
     });
     if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
+    if (asset.size != null && asset.size > MAX_PDF_BYTES) {
+      setErrMsg(
+        `PDFが大きすぎます（${Math.round(asset.size / 1024 / 1024)}MB）。1ファイル ${MAX_PDF_MB}MB までです。`,
+      );
+      setPhase("error");
+      return;
+    }
     const uri = await stagePdf(asset.uri);
     setStagedUri(uri);
     setName(asset.name.replace(/\.pdf$/i, ""));

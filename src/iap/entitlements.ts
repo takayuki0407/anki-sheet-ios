@@ -7,7 +7,7 @@ import { create } from "zustand";
 
 export type Tier = "none" | "standard" | "pro";
 
-export const STANDARD_DECK_LIMIT = 3;
+export const STANDARD_DECK_LIMIT = 10;
 
 interface EntitlementState {
   tier: Tier;

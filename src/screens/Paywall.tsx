@@ -80,11 +80,13 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         <View style={styles.plans}>
           <View style={styles.plan}>
             <Text style={styles.planName}>Standard</Text>
+            <Text style={styles.planPrice}>¥300/月 ・ ¥2,500/年</Text>
             <Text style={styles.planDesc}>本を {STANDARD_DECK_LIMIT} 冊まで取り込み</Text>
           </View>
           <View style={[styles.plan, styles.planPro]}>
             <Text style={styles.planName}>Pro</Text>
-            <Text style={styles.planDesc}>本を無制限に取り込み</Text>
+            <Text style={styles.planPrice}>¥600/月 ・ ¥5,000/年</Text>
+            <Text style={styles.planDesc}>本を無制限に取り込み＋クラウド同期(5GB)・他端末と進捗同期</Text>
           </View>
         </View>
 
@@ -196,6 +198,7 @@ const styles = StyleSheet.create({
   },
   planPro: { borderColor: colors.sand },
   planName: { fontSize: 15, fontWeight: "800", color: colors.text },
+  planPrice: { fontSize: 13, fontWeight: "700", color: colors.sand },
   planDesc: { fontSize: 12, color: colors.textSub, lineHeight: 18 },
   cta: { backgroundColor: colors.sand, paddingVertical: 16, borderRadius: 14, alignItems: "center" },
   disabled: { opacity: 0.6 },
