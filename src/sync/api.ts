@@ -1,0 +1,130 @@
+// Client for the sync backend (https://anki-sheet.pages.dev/api/sync/*), mirroring the web app.
+// The Firebase ID token authenticates each call; the Worker maps it to the account uid. JSON
+// endpoints use fetch here; the PDF blob (binary) is uploaded/downloaded via expo-file-system in
+// sync/deck.ts (RN can't build a Blob from a file the way the web does).
+import { getFirebaseAuth } from "../auth/firebase";
+
+export const SYNC_BASE = "https://anki-sheet.pages.dev/api/sync";
+
+/** Current Firebase ID token, or null when signed out / auth not configured. */
+export async function idToken(): Promise<string | null> {
+  const user = getFirebaseAuth()?.currentUser;
+  return user ? user.getIdToken() : null;
+}
+
+async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const token = await idToken();
+  if (!token) throw new Error("not_signed_in");
+  return fetch(`${SYNC_BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+}
+
+export interface RegisterResult {
+  ok: boolean;
+  limitReached?: boolean;
+  count?: number;
+  limit?: number;
+}
+
+/** Reserve an account-global slot for a book. ok:false + limitReached when the cap is hit. */
+export async function registerBook(
+  bookId: string,
+  name: string,
+  pageCount: number,
+  device: string,
+): Promise<RegisterResult> {
+  const res = await authedFetch("/books", {
+    method: "POST",
+    body: JSON.stringify({ book_id: bookId, name, page_count: pageCount, device }),
+  });
+  if (res.status === 403) {
+    const b = (await res.json().catch(() => ({}))) as { count?: number; limit?: number };
+    return { ok: false, limitReached: true, count: b.count, limit: b.limit };
+  }
+  if (!res.ok) throw new Error(`register failed: ${res.status}`);
+  return { ok: true };
+}
+
+/** Free an account-global slot (idempotent; 404 is fine). */
+export async function unregisterBook(bookId: string): Promise<void> {
+  const res = await authedFetch(`/books/${encodeURIComponent(bookId)}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error(`unregister failed: ${res.status}`);
+}
+
+export interface AccountBook {
+  book_id: string;
+  name: string;
+  size: number;
+  page_count: number;
+  device: string | null;
+  updated_at: number;
+}
+
+export interface AccountBooks {
+  books: AccountBook[];
+  count: number;
+  limit: number;
+  tier: "standard" | "pro" | "admin";
+  unlimited: boolean;
+}
+
+/** List the account's books (across all devices) with count + cap + tier. */
+export async function listBooks(): Promise<AccountBooks> {
+  const res = await authedFetch("/books");
+  if (!res.ok) throw new Error(`list failed: ${res.status}`);
+  return res.json();
+}
+
+/** Upload deck content JSON (name/color/geometry/clozes/bookmarks). 403 (standard) is a no-op. */
+export async function putContent(bookId: string, json: string): Promise<void> {
+  const res = await authedFetch(`/books/${encodeURIComponent(bookId)}/content`, {
+    method: "PUT",
+    body: json,
+  });
+  if (res.status === 403) return;
+  if (!res.ok) throw new Error(`putContent failed: ${res.status}`);
+}
+
+export async function getContent(bookId: string): Promise<unknown> {
+  const res = await authedFetch(`/books/${encodeURIComponent(bookId)}/content`);
+  if (!res.ok) throw new Error(`getContent failed: ${res.status}`);
+  return res.json();
+}
+
+// Progress sync (device-independent fields + revealed as portable keys; same shape as web).
+export interface ProgressData {
+  lastPage?: number;
+  lastMode?: "scroll" | "paged";
+  redMode?: "mask" | "sheet" | "off";
+  sheetBand?: { top: number; height: number };
+  revealedKeys?: string[];
+}
+
+export async function getProgress(
+  bookId: string,
+): Promise<{ data: ProgressData; updatedAt: number } | null> {
+  const res = await authedFetch(`/progress/${encodeURIComponent(bookId)}`);
+  if (res.status === 404 || res.status === 403) return null;
+  if (!res.ok) throw new Error(`getProgress failed: ${res.status}`);
+  const row = (await res.json()) as { data: string; updated_at: number };
+  try {
+    return { data: JSON.parse(row.data) as ProgressData, updatedAt: row.updated_at };
+  } catch {
+    return null;
+  }
+}
+
+export async function putProgress(bookId: string, data: ProgressData): Promise<void> {
+  const res = await authedFetch(`/progress/${encodeURIComponent(bookId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ data }),
+  });
+  if (res.status === 403) return;
+  if (!res.ok) throw new Error(`putProgress failed: ${res.status}`);
+}
