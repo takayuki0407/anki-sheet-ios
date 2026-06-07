@@ -7,9 +7,11 @@
 /** Support / contact email (opened from the help screen's お問い合わせ). */
 export const SUPPORT_EMAIL = "zabieru.0407@gmail.com";
 
-/** Public URLs for the legal docs (required by App Store review). */
-export const PRIVACY_URL = "https://takayuki0407.github.io/anki-sheet-ios/privacy.html";
-export const TERMS_URL = "https://takayuki0407.github.io/anki-sheet-ios/terms.html";
+/** Public URLs for the legal docs (required by App Store review).
+ * Served from the Cloudflare deployment — drop docs/privacy.html & docs/terms.html there
+ * (or add /privacy & /terms routes). Swap to a custom domain later if you get one. */
+export const PRIVACY_URL = "https://anki-sheet.zabieru-0407.workers.dev/privacy.html";
+export const TERMS_URL = "https://anki-sheet.zabieru-0407.workers.dev/terms.html";
 
 /** App Store numeric id (from App Store Connect once the app exists) — for the rate prompt. */
 export const APP_STORE_ID = ""; // e.g. "1234567890"
