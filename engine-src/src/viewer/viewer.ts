@@ -82,8 +82,9 @@ export class Viewer {
     vy: 0,
     raf: 0,
   };
-  // two-finger pinch zoom
-  private pinch = { active: false, startDist: 1, startZoom: 1 };
+  // two-finger pinch zoom (smooth: CSS transform during the gesture, real relayout on end)
+  private pinch = { active: false, startDist: 1, startZoom: 1, fcx: 0, fcy: 0, scale: 1 };
+  private contentEl: HTMLElement | null = null;
 
   constructor(root: HTMLElement, emit: Emit) {
     this.root = root;
@@ -138,6 +139,12 @@ export class Viewer {
     this.root.className = this.mode === "paged" ? "paged" : "";
     this.root.style.display = this.mode === "paged" ? "flex" : "block";
 
+    // All pages live in one wrapper so pinch can scale it (CSS transform) smoothly.
+    const content = document.createElement("div");
+    content.className = "vcontent";
+    this.contentEl = content;
+    this.root.appendChild(content);
+
     for (let i = 0; i < this.pageCount; i++) {
       const el = document.createElement("div");
       el.className = "vpage";
@@ -148,7 +155,7 @@ export class Viewer {
       maskLayer.className = "vmasks";
       el.appendChild(canvas);
       el.appendChild(maskLayer);
-      this.root.appendChild(el);
+      content.appendChild(el);
       this.views.push({
         el,
         canvas,
@@ -339,6 +346,14 @@ export class Viewer {
       this.pinch.active = true;
       this.pinch.startDist = this.touchDist(e.touches[0], e.touches[1]) || 1;
       this.pinch.startZoom = this.zoom;
+      this.pinch.scale = 1;
+      const rect = this.root.getBoundingClientRect();
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      this.pinch.fcx = this.root.scrollLeft + (cx - rect.left);
+      this.pinch.fcy = this.root.scrollTop + (cy - rect.top);
+      if (this.contentEl)
+        this.contentEl.style.transformOrigin = `${this.pinch.fcx}px ${this.pinch.fcy}px`;
       e.preventDefault();
       return;
     }
@@ -355,9 +370,10 @@ export class Viewer {
   private onTouchMove = (e: TouchEvent): void => {
     if (this.pinch.active && e.touches.length >= 2) {
       const d = this.touchDist(e.touches[0], e.touches[1]);
-      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      this.zoomAt(clamp(this.pinch.startZoom * (d / this.pinch.startDist), 0.5, 4), cx, cy);
+      const target = clamp(this.pinch.startZoom * (d / this.pinch.startDist), 0.5, 4);
+      this.pinch.scale = target / this.pinch.startZoom;
+      // GPU-composited scale of the whole content — smooth, no per-frame relayout.
+      if (this.contentEl) this.contentEl.style.transform = `scale(${this.pinch.scale})`;
       e.preventDefault();
       return;
     }
@@ -389,6 +405,7 @@ export class Viewer {
     if (this.pinch.active) {
       if (e.touches.length >= 2) return;
       this.pinch.active = false;
+      this.commitPinch();
       if (e.touches.length === 1) {
         const t = e.touches[0]; // one finger remains -> begin a fresh pan from it
         this.pan.active = true;
@@ -432,16 +449,24 @@ export class Viewer {
     this.pan.raf = requestAnimationFrame(step);
   };
 
-  /** Zoom toward a screen point (pinch), keeping that content point under the fingers. */
-  private zoomAt(nz: number, cx: number, cy: number): void {
-    if (Math.abs(nz - this.zoom) < 0.001) return;
-    const rect = this.root.getBoundingClientRect();
-    const fracX = (this.root.scrollLeft + (cx - rect.left)) / (this.root.scrollWidth || 1);
-    const fracY = (this.root.scrollTop + (cy - rect.top)) / (this.root.scrollHeight || 1);
-    this.zoom = clamp(nz, 0.5, 4);
+  /** Commit a pinch: replace the transient transform with a real relayout at the final
+   * zoom, keeping the pinch focal content point under the same screen point. */
+  private commitPinch(): void {
+    const target = clamp(this.pinch.startZoom * this.pinch.scale, 0.5, 4);
+    if (this.contentEl) {
+      this.contentEl.style.transform = "";
+      this.contentEl.style.transformOrigin = "";
+    }
+    this.pinch.scale = 1;
+    if (Math.abs(target - this.zoom) < 0.001) return;
+    const fracX = this.pinch.fcx / (this.root.scrollWidth || 1);
+    const fracY = this.pinch.fcy / (this.root.scrollHeight || 1);
+    const screenX = this.pinch.fcx - this.root.scrollLeft;
+    const screenY = this.pinch.fcy - this.root.scrollTop;
+    this.zoom = target;
     this.relayout();
-    this.root.scrollLeft = fracX * (this.root.scrollWidth || 1) - (cx - rect.left);
-    this.root.scrollTop = fracY * (this.root.scrollHeight || 1) - (cy - rect.top);
+    this.root.scrollLeft = fracX * (this.root.scrollWidth || 1) - screenX;
+    this.root.scrollTop = fracY * (this.root.scrollHeight || 1) - screenY;
     this.emit({ type: "zoom-changed", zoom: this.zoom });
   }
 

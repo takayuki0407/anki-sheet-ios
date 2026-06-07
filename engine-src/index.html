@@ -41,9 +41,16 @@
         align-items: center;
         justify-content: center;
       }
+      .vcontent {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        transform-origin: 0 0;
+        will-change: transform;
+      }
       .vpage {
         position: relative;
-        margin: 8px auto;
+        margin: 0 0 8px;
         background: #fff;
         box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
       }
