@@ -93,7 +93,7 @@ export class Viewer {
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
-  private manualGripEl: HTMLElement | null = null;
+  private manualGripEls: HTMLElement[] = []; // two slim handles, at the left & right ends
   private band = { top: 80, height: 150 };
 
   constructor(root: HTMLElement, emit: Emit) {
@@ -560,9 +560,9 @@ export class Viewer {
     if (on === !!this.manualSheetEl) return;
     if (!on) {
       this.manualSheetEl?.remove();
-      this.manualGripEl?.remove();
+      for (const g of this.manualGripEls) g.remove();
       this.manualSheetEl = null;
-      this.manualGripEl = null;
+      this.manualGripEls = [];
       this.applySheetClass(); // drop "manual"; masks go back to sheetOn / tap-reveal behaviour
       const w = this.cssW();
       for (const v of this.views) this.layoutMasks(v, w); // restore the tap-based reveal state
@@ -570,24 +570,26 @@ export class Viewer {
     }
     const sheet = document.createElement("div");
     sheet.className = "rsheet";
-    const grip = document.createElement("div");
-    grip.className = "rsheet-grip";
     document.body.appendChild(sheet);
-    document.body.appendChild(grip);
     this.manualSheetEl = sheet;
-    this.manualGripEl = grip;
+    // Two slim handles at the left & right ends of the top edge — both resize the top edge; the
+    // sheet body is pointer-events:none so touches fall through for scrolling/paging.
+    for (const side of ["left", "right"] as const) {
+      const grip = document.createElement("div");
+      grip.className = `rsheet-grip ${side}`;
+      document.body.appendChild(grip);
+      this.attachSheetDrag(grip);
+      this.manualGripEls.push(grip);
+    }
     this.applySheetClass(); // masks visible + non-interactive (the band controls reveal)
     this.layoutManualSheet();
-    // Only the top grip is draggable (resizes the top edge); the sheet body is pointer-events:none
-    // so touches fall through to the page for scrolling/paging.
-    this.attachSheetDrag(grip);
     this.manualReveal(); // reveal/cover the masks for the band's current position
   }
 
   private layoutManualSheet(): void {
-    if (!this.manualSheetEl || !this.manualGripEl) return;
+    if (!this.manualSheetEl) return;
     this.manualSheetEl.style.top = `${this.band.top}px`; // bottom pinned via CSS (bottom: 0)
-    this.manualGripEl.style.top = `${this.band.top - 13}px`; // grip on the TOP edge
+    for (const g of this.manualGripEls) g.style.top = `${this.band.top - 6}px`; // on the TOP edge
   }
 
   /** Reveal answers above the sheet's top edge and cover those below it — like sliding a physical

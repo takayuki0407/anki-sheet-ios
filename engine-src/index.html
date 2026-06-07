@@ -82,9 +82,16 @@
         pointer-events: none;
       }
       /* 赤シート (manual band) mode: masks stay visible (the band position reveals them) but
-         don't intercept touches, so the page scrolls/swipes through them. */
+         don't intercept touches, so the page scrolls/swipes through them. They're painted in the
+         SHEET's red (not the brighter 赤マスク red) so the covered region reads as one cohesive
+         red sheet rather than separate bright boxes. */
       #viewer.manual .vmask {
         pointer-events: none;
+        background: rgba(200, 60, 60, 0.92);
+        box-shadow: none;
+      }
+      #viewer.manual .vmask.revealed {
+        background: transparent; /* keep revealed answers see-through (higher specificity wins) */
       }
       .tapzone {
         position: fixed;
@@ -114,17 +121,23 @@
         box-shadow: inset 0 2px 0 rgba(190, 24, 60, 0.55); /* a line marking the top edge */
         pointer-events: none; /* scroll / swipe the page through the sheet */
       }
+      /* Two slim grab handles at the LEFT and RIGHT ends of the top edge (not the centre, which
+         covered the text being read). Both drag the top edge. Kept short so they don't obscure. */
       .rsheet-grip {
         position: fixed;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 72px;
-        height: 26px;
+        width: 92px;
+        height: 12px;
         z-index: 9;
-        border-radius: 13px;
-        background: #e05a5a;
-        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+        border-radius: 6px;
+        background: #d24b4b;
+        box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
         touch-action: none;
+      }
+      .rsheet-grip.left {
+        left: 12px;
+      }
+      .rsheet-grip.right {
+        right: 12px;
       }
     </style>
   </head>
