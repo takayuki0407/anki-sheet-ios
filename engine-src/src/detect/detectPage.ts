@@ -92,8 +92,9 @@ export function detectPage(
   for (const run of runs) {
     if (!run.str || !run.str.trim()) continue; // skip whitespace-only runs
     const s = sampleSegments(pixels, run.deviceBox, cfg);
-    const colored =
-      s.segments.length > 0 && s.bandPx >= minBand && s.bandPx >= s.inkPx * cfg.inkRatioFloor;
+    // Segmentation isolates the colored pixels per span, so the run-level ink-ratio gate
+    // (which dropped a small red phrase inside a mostly-black run) is no longer needed.
+    const colored = s.segments.length > 0 && s.bandPx >= minBand;
 
     if (colored) {
       // Each colored span is its own piece; spans within a run are split by black text, so
