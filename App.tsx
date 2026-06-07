@@ -1,6 +1,6 @@
 // Root: mounts the app-wide headless detection engine and switches between screens
 // based on the zustand view store (mirrors the original web app's single-stack model).
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { SafeAreaView, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { EngineProvider } from "./src/engine/EngineProvider";
@@ -11,7 +11,10 @@ import { ImportWizard } from "./src/screens/ImportWizard";
 import { PageViewer } from "./src/screens/PageViewer";
 import { Settings } from "./src/screens/Settings";
 import { Paywall } from "./src/screens/Paywall";
+import { Info } from "./src/screens/Info";
 import { EngineTest } from "./src/screens/EngineTest";
+import { Onboarding } from "./src/screens/Onboarding";
+import { getMeta, setMeta } from "./src/db/repo";
 import { colors } from "./src/ui/theme";
 
 function Router() {
@@ -27,20 +30,33 @@ function Router() {
       return <Settings key={view.deckId} deckId={view.deckId} />;
     case "paywall":
       return <Paywall />;
+    case "info":
+      return <Info />;
     case "engineTest":
       return <EngineTest />;
   }
 }
 
 export default function App() {
+  const [onboarded, setOnboarded] = useState<boolean | null>(null);
   useEffect(() => {
     void initPurchases();
+    getMeta("onboarded").then((v) => setOnboarded(v === "1"));
   }, []);
   return (
     <EngineProvider>
       <SafeAreaView style={styles.root}>
         <StatusBar style="dark" />
-        <Router />
+        {onboarded === false ? (
+          <Onboarding
+            onDone={() => {
+              setOnboarded(true);
+              void setMeta("onboarded", "1");
+            }}
+          />
+        ) : onboarded === null ? null : (
+          <Router />
+        )}
       </SafeAreaView>
     </EngineProvider>
   );

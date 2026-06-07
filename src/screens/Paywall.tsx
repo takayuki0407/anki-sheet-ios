@@ -2,11 +2,12 @@
 // free-tier gate (FREE_DECK_LIMIT books) routes here when exceeded. A DEV-only local
 // unlock lets the 3-deck gate be exercised before RevenueCat products are configured.
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import type { PurchasesPackage } from "react-native-purchases";
 import { useApp } from "../store/session";
 import { FREE_DECK_LIMIT, useEntitlements } from "../iap/entitlements";
 import { getCurrentOffering, purchase, restore } from "../iap/purchases";
+import { PRIVACY_URL, TERMS_URL } from "../config";
 import { colors } from "../ui/theme";
 
 export function Paywall() {
@@ -89,6 +90,21 @@ export function Paywall() {
           <Text style={styles.restore}>購入を復元</Text>
         </Pressable>
 
+        <Text style={styles.disclosure}>
+          お支払いは購入確定時にApp Storeアカウントへ請求されます。サブスクリプションは、現在の期間
+          終了の24時間前までに自動更新をオフにしない限り自動更新され、同額が請求されます。更新の管理・
+          解約はiOSの「設定」→ Apple ID →「サブスクリプション」からいつでも行えます。
+        </Text>
+        <View style={styles.legalRow}>
+          <Pressable onPress={() => Linking.openURL(TERMS_URL)} hitSlop={6}>
+            <Text style={styles.legalLink}>利用規約</Text>
+          </Pressable>
+          <Text style={styles.legalSep}>・</Text>
+          <Pressable onPress={() => Linking.openURL(PRIVACY_URL)} hitSlop={6}>
+            <Text style={styles.legalLink}>プライバシーポリシー</Text>
+          </Pressable>
+        </View>
+
         {__DEV__ ? (
           <Pressable
             style={styles.devUnlock}
@@ -118,6 +134,10 @@ const styles = StyleSheet.create({
   ctaText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   muted: { color: colors.muted, fontSize: 13, textAlign: "center" },
   restore: { color: colors.ocean, fontSize: 15, textAlign: "center", paddingVertical: 8 },
+  disclosure: { color: colors.textSub, fontSize: 11, lineHeight: 16, textAlign: "center", marginTop: 8 },
+  legalRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 4 },
+  legalLink: { color: colors.ocean, fontSize: 12 },
+  legalSep: { color: colors.muted, fontSize: 12 },
   devUnlock: { paddingVertical: 10, alignItems: "center" },
   devUnlockText: { color: colors.muted, fontSize: 12 },
 });
