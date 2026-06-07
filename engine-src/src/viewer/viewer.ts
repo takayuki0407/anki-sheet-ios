@@ -217,6 +217,7 @@ export class Viewer {
       if (v.rendering) v.dirty = true; // re-render once the in-flight render bails out
     }
     this.renderVisible();
+    if (this.manualSheetEl) this.manualReveal(); // layoutMasks rebuilt masks from the set; re-gate
   }
 
   private layoutMasks(v: PageView, w: number): void {
@@ -337,6 +338,7 @@ export class Viewer {
         this.current = best;
         this.emit({ type: "page-changed", page: best });
       }
+      if (this.manualSheetEl) this.manualReveal(); // scrolling past the sheet edge reveals answers
     });
   };
 
@@ -545,10 +547,15 @@ export class Viewer {
   }
 
   private applySheetClass(): void {
-    this.root.classList.toggle("sheet-off", !this.sheetOn);
+    // In 赤シート (manual band) mode the detection masks stay visible and the band's position
+    // decides what's revealed — so don't blank them with sheet-off; mark the root "manual" so
+    // the masks become non-interactive (the page scrolls through them).
+    this.root.classList.toggle("sheet-off", !this.sheetOn && !this.manualSheetEl);
+    this.root.classList.toggle("manual", !!this.manualSheetEl);
   }
 
-  /** Toggle the manual red sheet — a band slid over the page (縦読み). Fixed to the viewport. */
+  /** Toggle the manual red sheet — a band slid over the page (縦読み). Fixed to the viewport.
+   * The band itself only tints; the detection masks do the hiding, gated by the band position. */
   setManualSheet(on: boolean): void {
     if (on === !!this.manualSheetEl) return;
     if (!on) {
@@ -556,6 +563,9 @@ export class Viewer {
       this.manualGripEl?.remove();
       this.manualSheetEl = null;
       this.manualGripEl = null;
+      this.applySheetClass(); // drop "manual"; masks go back to sheetOn / tap-reveal behaviour
+      const w = this.cssW();
+      for (const v of this.views) this.layoutMasks(v, w); // restore the tap-based reveal state
       return;
     }
     const sheet = document.createElement("div");
@@ -566,16 +576,38 @@ export class Viewer {
     document.body.appendChild(grip);
     this.manualSheetEl = sheet;
     this.manualGripEl = grip;
+    this.applySheetClass(); // masks visible + non-interactive (the band controls reveal)
     this.layoutManualSheet();
     // Only the top grip is draggable (resizes the top edge); the sheet body is pointer-events:none
     // so touches fall through to the page for scrolling/paging.
     this.attachSheetDrag(grip);
+    this.manualReveal(); // reveal/cover the masks for the band's current position
   }
 
   private layoutManualSheet(): void {
     if (!this.manualSheetEl || !this.manualGripEl) return;
     this.manualSheetEl.style.top = `${this.band.top}px`; // bottom pinned via CSS (bottom: 0)
     this.manualGripEl.style.top = `${this.band.top - 13}px`; // grip on the TOP edge
+  }
+
+  /** Reveal answers above the sheet's top edge and cover those below it — like sliding a physical
+   * red sheet. Only the red detection masks change; the black body text is never touched. Cheap:
+   * pure arithmetic from offsets (no getBoundingClientRect), and skips off-screen pages. */
+  private manualReveal(): void {
+    if (!this.manualSheetEl || this.mode !== "scroll" || this.pinch.active) return;
+    const scrollTop = this.root.scrollTop;
+    const vh = this.root.clientHeight || 1;
+    const line = this.band.top; // the band's top edge, in viewport coordinates
+    for (const v of this.views) {
+      const pageTop = v.el.offsetTop - scrollTop; // viewport Y of this page's top
+      if (pageTop + v.el.offsetHeight < -40 || pageTop > vh + 40) continue; // off-screen
+      const masks = v.maskLayer.children;
+      for (let j = 0; j < masks.length; j++) {
+        const m = masks[j] as HTMLElement;
+        const cy = pageTop + parseFloat(m.style.top) + parseFloat(m.style.height) / 2;
+        m.classList.toggle("revealed", cy < line); // above the edge -> revealed
+      }
+    }
   }
 
   // The grip drags the TOP edge; the bottom edge stays pinned to the viewport bottom.
@@ -603,6 +635,7 @@ export class Viewer {
         this.band.top = Math.max(0, Math.min(vh - 28, startTop + (e.touches[0].clientY - startY)));
         this.band.height = vh - this.band.top;
         this.layoutManualSheet();
+        this.manualReveal(); // re-reveal/cover as the sheet's top edge moves
         e.preventDefault();
         e.stopPropagation();
       },

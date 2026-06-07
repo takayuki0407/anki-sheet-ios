@@ -81,6 +81,11 @@
         box-shadow: none;
         pointer-events: none;
       }
+      /* 赤シート (manual band) mode: masks stay visible (the band position reveals them) but
+         don't intercept touches, so the page scrolls/swipes through them. */
+      #viewer.manual .vmask {
+        pointer-events: none;
+      }
       .tapzone {
         position: fixed;
         top: 0;
@@ -94,20 +99,19 @@
       .tapzone.right {
         right: 0;
       }
-      /* Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
-         "Frosted" filter — brightness() is multiplicative so black text stays BLACK (0×k = 0),
-         while saturate→desaturate + brighten + a light blur wash the red/magenta answers into
-         illegible smudges (a multiply filter left the red answers readable). */
+      /* Manual red sheet (縦読み): a draggable band slid over the page like a physical 赤シート.
+         The band is only a faint tint (NO blur / NO heavy filter) so the BLACK body text stays
+         crisp — the actual hiding is done by the detection masks (.vmask), which the band's
+         position reveals/covers (answer above the top edge = revealed, below = hidden). This
+         hides ONLY the red answers and never touches the black text. */
       .rsheet {
         position: fixed;
         left: 0;
         right: 0;
         bottom: 0; /* the bottom edge stays at the viewport bottom; only the top edge moves */
         z-index: 8;
-        background: rgba(200, 64, 64, 0.12); /* faint warm tint for the red-sheet identity */
-        backdrop-filter: saturate(0.12) brightness(1.4) blur(2px);
-        -webkit-backdrop-filter: saturate(0.12) brightness(1.4) blur(2px);
-        box-shadow: inset 0 2px 0 rgba(190, 24, 60, 0.45); /* a line marking the top edge */
+        background: rgba(200, 60, 60, 0.14); /* faint warm tint — black stays crisp */
+        box-shadow: inset 0 2px 0 rgba(190, 24, 60, 0.55); /* a line marking the top edge */
         pointer-events: none; /* scroll / swipe the page through the sheet */
       }
       .rsheet-grip {
