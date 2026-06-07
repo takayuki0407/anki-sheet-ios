@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "comment": "The real-PDF integration test depends on Node-only optional packages (pdfjs legacy + @napi-rs/canvas) whose types clash with the DOM lib. It is run by vitest at runtime (when ANKI_SHEET_TEST_PDF is set), not type-checked here.",
+  "exclude": ["src/**/*.integration.test.ts"]
+}

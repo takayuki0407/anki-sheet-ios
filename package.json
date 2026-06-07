@@ -4,9 +4,18 @@
   "main": "index.ts",
   "dependencies": {
     "expo": "~56.0.9",
+    "expo-asset": "~56.0.16",
+    "expo-document-picker": "~56.0.4",
+    "expo-file-system": "~56.0.7",
+    "expo-sharing": "~56.0.16",
+    "expo-sqlite": "~56.0.4",
     "expo-status-bar": "~56.0.4",
+    "fflate": "^0.8.3",
     "react": "19.2.3",
-    "react-native": "0.85.3"
+    "react-native": "0.85.3",
+    "react-native-purchases": "^10.2.2",
+    "react-native-webview": "13.16.1",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -16,7 +25,10 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "engine:build": "npm --prefix engine-src run build",
+    "engine:bundle": "node scripts/bundle-engine.mjs",
+    "engine:all": "npm run engine:build && npm run engine:bundle"
   },
   "private": true
 }
