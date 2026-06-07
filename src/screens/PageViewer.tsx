@@ -161,15 +161,19 @@ export function PageViewer({ deckId }: { deckId: number }) {
 
   const goPrev = () => ref.current?.goToPage(Math.max(0, page - 1));
   const goNext = () => ref.current?.goToPage(Math.min(pageCount - 1, page + 1));
-  const toggleSheet = () => {
-    const v = !sheetOn;
-    setSheetOn(v);
-    ref.current?.setSheet(v);
+  // 赤マスク / 赤シート / OFF are EXCLUSIVE (no combining the mask + the manual sheet).
+  const applyRed = (mask: boolean, manual: boolean) => {
+    setSheetOn(mask);
+    ref.current?.setSheet(mask);
+    setManualSheet(manual);
+    ref.current?.setManualSheet(manual);
   };
-  const toggleManualSheet = () => {
-    const v = !manualSheet;
-    setManualSheet(v);
-    ref.current?.setManualSheet(v);
+  const redMode: "mask" | "sheet" | "off" = sheetOn ? "mask" : manualSheet ? "sheet" : "off";
+  const redModeLabel = redMode === "mask" ? "赤マスク" : redMode === "sheet" ? "赤シート" : "表示OFF";
+  const cycleRed = () => {
+    if (redMode === "mask") applyRed(false, mode === "scroll"); // 赤シート is 縦読み-only
+    else if (redMode === "sheet") applyRed(false, false);
+    else applyRed(true, false);
   };
   const toggleMode = () => {
     const m: ReadMode = mode === "scroll" ? "paged" : "scroll";
@@ -342,10 +346,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
         </View>
 
         <View style={styles.toolRow}>
-          <Tool label="赤シート" on={sheetOn} onPress={toggleSheet} />
-          {mode === "scroll" && (
-            <Tool label="重ねシート" on={manualSheet} onPress={toggleManualSheet} />
-          )}
+          <Tool label={redModeLabel} on={redMode !== "off"} onPress={cycleRed} />
           <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
           <Tool label="目次" onPress={openBookmarks} />
         </View>
