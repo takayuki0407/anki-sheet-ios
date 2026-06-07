@@ -129,7 +129,7 @@ export async function importDeck(p: ImportParams): Promise<number> {
     });
     // Move the staged PDF into place AFTER commit, so a rolled-back import never consumes
     // it (leaving import.pdf intact for a retry).
-    savePdfForDeck(deckId, p.stagedPdfUri);
+    await savePdfForDeck(deckId, p.stagedPdfUri);
     return deckId;
   });
 }

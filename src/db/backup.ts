@@ -225,7 +225,7 @@ export async function importBackup(fileUri: string): Promise<void> {
     if (decksDir.exists) decksDir.delete();
     decksDir.create({ intermediates: true, idempotent: true });
     for (const p of data.pdfs) {
-      new File(Paths.document, "decks.import", `${p.deckId}.pdf`).moveSync(deckPdfFile(p.deckId));
+      await new File(Paths.document, "decks.import", `${p.deckId}.pdf`).move(deckPdfFile(p.deckId));
     }
     if (staging.exists) staging.delete();
   });

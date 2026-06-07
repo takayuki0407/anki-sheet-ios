@@ -90,7 +90,7 @@ export function ImportWizard() {
     });
     if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
-    const uri = stagePdf(asset.uri);
+    const uri = await stagePdf(asset.uri);
     setStagedUri(uri);
     setName(asset.name.replace(/\.pdf$/i, ""));
     runDetect(uri, presetKey);

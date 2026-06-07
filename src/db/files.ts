@@ -20,12 +20,12 @@ export function deckPdfFile(deckId: number): File {
  * its file:// URL. The viewer loads this URL; it stays inside the document directory so a
  * single allowingReadAccessToURL grant covers it.
  */
-export function savePdfForDeck(deckId: number, stagedUri: string): string {
+export async function savePdfForDeck(deckId: number, stagedUri: string): Promise<string> {
   ensureDir(DECKS);
   const dest = deckPdfFile(deckId);
   if (dest.exists) dest.delete();
-  // Sync move: File.move() is async in SDK 56, and callers consume the URI immediately.
-  new File(stagedUri).moveSync(dest);
+  // Awaited so the PDF is in place before callers use the returned URI.
+  await new File(stagedUri).move(dest);
   return dest.uri;
 }
 

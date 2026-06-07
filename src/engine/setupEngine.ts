@@ -72,11 +72,11 @@ export async function ensureEngine(): Promise<string> {
  * Copy a picked PDF into the document directory (the WebView's read-access scope) so the
  * engine can load it by file:// URL. Returns that URL. Replaces any previous import.pdf.
  */
-export function stagePdf(srcUri: string, name = "import.pdf"): string {
+export async function stagePdf(srcUri: string, name = "import.pdf"): Promise<string> {
   const dest = new File(Paths.document, name);
   if (dest.exists) dest.delete();
-  // Sync copy: File.copy() is async in SDK 56, and the engine reads the URI immediately.
-  new File(srcUri).copySync(dest);
+  // Awaited so the file is on disk before the engine reads the returned URI.
+  await new File(srcUri).copy(dest);
   return dest.uri;
 }
 

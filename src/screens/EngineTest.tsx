@@ -29,7 +29,7 @@ export function EngineTest() {
         setStatus("キャンセル");
         return;
       }
-      const url = stagePdf(res.assets[0].uri);
+      const url = await stagePdf(res.assets[0].uri);
       setStatus("検出中…");
       const t0 = Date.now();
       const det = await engine.detectAll({ url }, (p) =>
