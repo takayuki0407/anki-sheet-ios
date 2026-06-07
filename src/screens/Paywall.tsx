@@ -86,7 +86,7 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
           <View style={[styles.plan, styles.planPro]}>
             <Text style={styles.planName}>Pro</Text>
             <Text style={styles.planPrice}>¥600/月 ・ ¥5,000/年</Text>
-            <Text style={styles.planDesc}>本を無制限に取り込み＋クラウド同期(5GB)・他端末と進捗同期</Text>
+            <Text style={styles.planDesc}>本を無制限に取り込み＋クラウドストレージ5GB・全ての端末/プラットフォームで進捗同期</Text>
           </View>
         </View>
 
