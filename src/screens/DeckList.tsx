@@ -108,7 +108,7 @@ export function DeckList() {
   }, [isPremium, setView]);
 
   const pickView = useCallback(() => {
-    Alert.alert("表示方法", "Windowsエクスプローラー風に切り替えできます", [
+    Alert.alert("表示方法", undefined, [
       ...VIEW_ORDER.map((m) => ({
         text: VIEW_LABELS[m] + (viewMode === m ? "  ✓" : ""),
         onPress: () => {
