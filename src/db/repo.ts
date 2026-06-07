@@ -317,3 +317,19 @@ export async function deleteBookmark(id: number): Promise<void> {
   const db = await getDb();
   await db.runAsync("DELETE FROM bookmarks WHERE id = ?", [id]);
 }
+
+// ---- app preferences (meta) ----
+
+export async function getMeta(key: string): Promise<string | undefined> {
+  const db = await getDb();
+  const r = await db.getFirstAsync<{ value: string | null }>(
+    "SELECT value FROM meta WHERE key = ?",
+    [key],
+  );
+  return r?.value ?? undefined;
+}
+
+export async function setMeta(key: string, value: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [key, value]);
+}

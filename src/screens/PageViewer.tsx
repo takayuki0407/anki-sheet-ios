@@ -1,9 +1,10 @@
 // 赤シートビューア — hosts the WebView viewer and supplies native chrome (back/settings,
-// page nav, sheet/mode/fit/zoom toggles, 目次 bookmarks). Opens at the last-read page and
-// mode, and persists position as you read.
+// page nav, zoom with one-tap 100% reset, 幅/全体 fit, sheet/mode toggles, 目次 bookmarks
+// with custom names + editing). Pinch-zoom and axis-locked panning are handled in-engine.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -22,10 +23,13 @@ import {
   getDeck,
   getDeckPdf,
   listBookmarks,
+  renameBookmark,
   updateDeck,
 } from "../db/repo";
 import type { BookmarkRow, ReadMode } from "../db/rows";
 import { colors } from "../ui/theme";
+
+type FitMode = "width" | "page";
 
 function Tool({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) {
   return (
@@ -44,7 +48,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [page, setPage] = useState(0);
   const [pageCount, setPageCount] = useState(0);
   const [mode, setMode] = useState<ReadMode>("scroll");
-  const [fit, setFit] = useState<"width" | "page">("width");
+  const [fit, setFit] = useState<FitMode>("width");
   const [zoom, setZoom] = useState(1);
   const [sheetOn, setSheetOn] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -131,16 +135,15 @@ export function PageViewer({ deckId }: { deckId: number }) {
     ref.current?.setMode(m);
     void updateDeck(deckId, { lastMode: m });
   };
-  const toggleFit = () => {
-    const f = fit === "width" ? "page" : "width";
+  const setFitMode = (f: FitMode) => {
     setFit(f);
     ref.current?.setFit(f);
   };
-  const zoomBy = (d: number) => {
-    const z = Math.max(0.5, Math.min(4, Math.round((zoom + d) * 100) / 100));
-    setZoom(z);
-    ref.current?.setZoom(z);
-  };
+  // Zoom is owned by the engine (so pinch and buttons stay in sync): ask it to change,
+  // then the zoom-changed event updates our displayed %.
+  const zoomBy = (d: number) =>
+    ref.current?.setZoom(Math.max(0.5, Math.min(4, Math.round((zoom + d) * 100) / 100)));
+  const resetZoom = () => ref.current?.setZoom(1);
 
   const back = useCallback(() => {
     void updateDeck(deckId, { lastPage: page, lastMode: mode });
@@ -151,10 +154,39 @@ export function PageViewer({ deckId }: { deckId: number }) {
     setBookmarks(await listBookmarks(deckId));
     setBmOpen(true);
   }, [deckId]);
-  const addCurrent = useCallback(async () => {
-    await addBookmark(deckId, page, `${page + 1}ページ`);
-    setBookmarks(await listBookmarks(deckId));
+
+  const addCurrent = useCallback(() => {
+    Alert.prompt(
+      "しおりを追加",
+      "名前を入力してください",
+      async (text) => {
+        const title = (text ?? "").trim() || `${page + 1}ページ`;
+        await addBookmark(deckId, page, title);
+        setBookmarks(await listBookmarks(deckId));
+      },
+      "plain-text",
+      `${page + 1}ページ`,
+    );
   }, [deckId, page]);
+
+  const renameBm = useCallback(
+    (b: BookmarkRow) => {
+      Alert.prompt(
+        "名前を変更",
+        undefined,
+        async (text) => {
+          const title = (text ?? "").trim();
+          if (!title) return;
+          await renameBookmark(b.id, title);
+          setBookmarks(await listBookmarks(deckId));
+        },
+        "plain-text",
+        b.title,
+      );
+    },
+    [deckId],
+  );
+
   const removeBm = useCallback(
     async (id: number) => {
       await deleteBookmark(id);
@@ -164,6 +196,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
   );
 
   const percent = pageCount > 0 ? Math.round(((page + 1) / pageCount) * 100) : 0;
+  const zoomPct = Math.round(zoom * 100);
 
   if (err) {
     return (
@@ -201,6 +234,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
               setPage(p);
             }}
             onPageChanged={onPageChanged}
+            onZoomChanged={setZoom}
             onError={(m) => setErr(m)}
           />
         ) : (
@@ -222,12 +256,42 @@ export function PageViewer({ deckId }: { deckId: number }) {
             <Text style={styles.navTxt}>›</Text>
           </Pressable>
         </View>
+
+        <View style={styles.zoomRow}>
+          <View style={styles.seg}>
+            <Pressable
+              style={[styles.segBtn, fit === "width" && styles.segOn]}
+              onPress={() => setFitMode("width")}
+            >
+              <Text style={[styles.segTxt, fit === "width" && styles.segTxtOn]}>幅</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.segBtn, fit === "page" && styles.segOn]}
+              onPress={() => setFitMode("page")}
+            >
+              <Text style={[styles.segTxt, fit === "page" && styles.segTxtOn]}>全体</Text>
+            </Pressable>
+          </View>
+          <View style={styles.zoomCtrls}>
+            <Pressable style={styles.zBtn} onPress={() => zoomBy(-0.2)} hitSlop={6}>
+              <Text style={styles.zTxt}>−</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.zPctBtn, zoomPct !== 100 && styles.zPctOn]}
+              onPress={resetZoom}
+              hitSlop={6}
+            >
+              <Text style={[styles.zPct, zoomPct !== 100 && styles.zPctTxtOn]}>{zoomPct}%</Text>
+            </Pressable>
+            <Pressable style={styles.zBtn} onPress={() => zoomBy(0.2)} hitSlop={6}>
+              <Text style={styles.zTxt}>＋</Text>
+            </Pressable>
+          </View>
+        </View>
+
         <View style={styles.toolRow}>
           <Tool label="赤シート" on={sheetOn} onPress={toggleSheet} />
           <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
-          <Tool label={fit === "width" ? "幅" : "全体"} onPress={toggleFit} />
-          <Tool label="−" onPress={() => zoomBy(-0.2)} />
-          <Tool label="＋" onPress={() => zoomBy(0.2)} />
           <Tool label="目次" onPress={openBookmarks} />
         </View>
       </View>
@@ -241,7 +305,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
             </Pressable>
           </View>
           <Pressable style={styles.addBm} onPress={addCurrent}>
-            <Text style={styles.addBmTxt}>＋ 現在のページ（{page + 1}）を追加</Text>
+            <Text style={styles.addBmTxt}>＋ 現在のページ（{page + 1}）をしおりに追加</Text>
           </Pressable>
           <FlatList
             data={bookmarks}
@@ -258,6 +322,9 @@ export function PageViewer({ deckId }: { deckId: number }) {
                 >
                   <Text style={styles.bmTitle}>{item.title}</Text>
                   <Text style={styles.muted}>{item.pageIndex + 1} ページ</Text>
+                </Pressable>
+                <Pressable onPress={() => renameBm(item)} hitSlop={8}>
+                  <Text style={styles.bmEdit}>編集</Text>
                 </Pressable>
                 <Pressable onPress={() => removeBm(item.id)} hitSlop={8}>
                   <Text style={styles.bmDel}>削除</Text>
@@ -290,10 +357,23 @@ const styles = StyleSheet.create({
   title: { flex: 1, textAlign: "center", fontSize: 15, fontWeight: "700", color: colors.text },
   viewerWrap: { flex: 1 },
   bottom: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: 6 },
-  navRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18, paddingVertical: 6 },
+  navRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18, paddingVertical: 5 },
   navBtn: { paddingHorizontal: 16 },
   navTxt: { fontSize: 26, color: colors.sand, fontWeight: "700" },
   pageTxt: { fontSize: 14, color: colors.text, minWidth: 120, textAlign: "center" },
+  zoomRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 4 },
+  seg: { flexDirection: "row", borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: "hidden" },
+  segBtn: { paddingHorizontal: 16, paddingVertical: 7, backgroundColor: colors.surface },
+  segOn: { backgroundColor: colors.sand },
+  segTxt: { fontSize: 14, color: colors.text },
+  segTxtOn: { color: "#fff", fontWeight: "700" },
+  zoomCtrls: { flexDirection: "row", alignItems: "center", gap: 6 },
+  zBtn: { width: 38, height: 36, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  zTxt: { fontSize: 20, color: colors.sand, fontWeight: "700" },
+  zPctBtn: { minWidth: 60, paddingVertical: 7, borderRadius: 8, alignItems: "center" },
+  zPctOn: { backgroundColor: colors.sand },
+  zPct: { fontSize: 14, color: colors.text },
+  zPctTxtOn: { color: "#fff", fontWeight: "700" },
   toolRow: { flexDirection: "row", justifyContent: "space-around", paddingVertical: 4 },
   tool: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
   toolOn: { backgroundColor: colors.sand },
@@ -305,8 +385,9 @@ const styles = StyleSheet.create({
   addBm: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 8 },
   addBmTxt: { color: colors.ocean, fontSize: 15 },
   muted: { color: colors.muted, fontSize: 13, paddingVertical: 8 },
-  bmRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
+  bmRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 12 },
   bmJump: { flex: 1 },
   bmTitle: { fontSize: 15, color: colors.text },
+  bmEdit: { color: colors.ocean, fontSize: 14 },
   bmDel: { color: colors.error, fontSize: 14 },
 });

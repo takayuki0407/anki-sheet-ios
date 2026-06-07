@@ -31,9 +31,10 @@
         inset: 0;
         display: none; /* shown only when the viewer is opened */
         overflow: auto;
-        -webkit-overflow-scrolling: touch;
         overscroll-behavior: contain;
         background: #525659;
+        /* We own panning/zoom (custom touch handlers) for axis-lock + pinch. */
+        touch-action: none;
       }
       #viewer.paged {
         overflow: hidden;

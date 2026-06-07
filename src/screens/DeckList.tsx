@@ -1,5 +1,6 @@
-// 本棚 — imported books as a cover-thumbnail grid. Tap to read; long-press for
-// settings/delete. The "＋ 取り込む" action enforces the free-tier deck limit.
+// 本棚 — imported books. View styles (Explorer-like): 特大/大/中アイコン grids + 一覧 list,
+// persisted. Tap to read; long-press for settings/delete. "＋ 取り込む" enforces the
+// free-tier deck limit. Restored decks regenerate their cover thumbnails lazily.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useApp } from "../store/session";
@@ -8,7 +9,16 @@ import { useDetectionEngine } from "../engine/EngineProvider";
 import { deckPdfFile } from "../db/files";
 import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
-import { answerCount, deckCountTotal, deleteDeck, getCover, listDecks, setCover } from "../db/repo";
+import {
+  answerCount,
+  deckCountTotal,
+  deleteDeck,
+  getCover,
+  getMeta,
+  listDecks,
+  setCover,
+  setMeta,
+} from "../db/repo";
 import { exportBackup, importBackup } from "../db/backup";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
@@ -19,11 +29,24 @@ interface DeckVM {
   count: number;
 }
 
+type ViewMode = "xl" | "l" | "m" | "list";
+const COLS: Record<ViewMode, number> = { xl: 2, l: 3, m: 4, list: 1 };
+const VIEW_LABELS: Record<ViewMode, string> = {
+  xl: "特大アイコン",
+  l: "大アイコン",
+  m: "中アイコン",
+  list: "一覧",
+};
+const VIEW_ORDER: ViewMode[] = ["xl", "l", "m", "list"];
+const isViewMode = (v: unknown): v is ViewMode =>
+  v === "xl" || v === "l" || v === "m" || v === "list";
+
 export function DeckList() {
   const setView = useApp((s) => s.setView);
   const isPremium = useEntitlements((s) => s.isPremium);
   const engine = useDetectionEngine();
   const [items, setItems] = useState<DeckVM[] | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("l");
   const regenRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -41,6 +64,12 @@ export function DeckList() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    getMeta("bookshelfView").then((v) => {
+      if (isViewMode(v)) setViewMode(v);
+    });
+  }, []);
 
   // Restored decks have no cover (backup omits them) — regenerate lazily in the background.
   useEffect(() => {
@@ -77,6 +106,19 @@ export function DeckList() {
     }
     setView({ name: "import" });
   }, [isPremium, setView]);
+
+  const pickView = useCallback(() => {
+    Alert.alert("表示方法", "Windowsエクスプローラー風に切り替えできます", [
+      ...VIEW_ORDER.map((m) => ({
+        text: VIEW_LABELS[m] + (viewMode === m ? "  ✓" : ""),
+        onPress: () => {
+          setViewMode(m);
+          void setMeta("bookshelfView", m);
+        },
+      })),
+      { text: "キャンセル", style: "cancel" as const },
+    ]);
+  }, [viewMode]);
 
   const onBackup = useCallback(() => {
     Alert.alert("バックアップ", "全データ（PDF含む）をJSONで入出力します。", [
@@ -146,6 +188,52 @@ export function DeckList() {
     [confirmDelete, setView],
   );
 
+  const cols = COLS[viewMode];
+
+  const renderGrid = ({ item }: { item: DeckVM }) => (
+    <Pressable
+      style={styles.card}
+      onPress={() => setView({ name: "viewer", deckId: item.deck.id })}
+      onLongPress={() => onLongPress(item.deck)}
+    >
+      <View style={styles.coverWrap}>
+        {item.cover ? (
+          <Image source={{ uri: item.cover }} style={styles.cover} resizeMode="cover" />
+        ) : (
+          <View style={[styles.cover, styles.coverPlaceholder]}>
+            <Text style={styles.muted}>PDF</Text>
+          </View>
+        )}
+      </View>
+      <Text style={styles.cardName} numberOfLines={2}>
+        {item.deck.name}
+      </Text>
+      <Text style={styles.cardCount}>{item.count} 問</Text>
+    </Pressable>
+  );
+
+  const renderList = ({ item }: { item: DeckVM }) => (
+    <Pressable
+      style={styles.listRow}
+      onPress={() => setView({ name: "viewer", deckId: item.deck.id })}
+      onLongPress={() => onLongPress(item.deck)}
+    >
+      {item.cover ? (
+        <Image source={{ uri: item.cover }} style={styles.listCover} resizeMode="cover" />
+      ) : (
+        <View style={[styles.listCover, styles.coverPlaceholder]}>
+          <Text style={styles.muted}>PDF</Text>
+        </View>
+      )}
+      <View style={styles.listInfo}>
+        <Text style={styles.listName} numberOfLines={1}>
+          {item.deck.name}
+        </Text>
+        <Text style={styles.cardCount}>{item.count} 問</Text>
+      </View>
+    </Pressable>
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -153,9 +241,14 @@ export function DeckList() {
           <Text style={styles.brand}>Anki-sheet</Text>
           <Text style={styles.brandSub}>赤シート暗記</Text>
         </View>
-        <Pressable style={styles.addBtn} onPress={onImport}>
-          <Text style={styles.addBtnText}>＋ 取り込む</Text>
-        </Pressable>
+        <View style={styles.headerBtns}>
+          <Pressable style={styles.viewBtn} onPress={pickView} hitSlop={6}>
+            <Text style={styles.viewBtnText}>表示</Text>
+          </Pressable>
+          <Pressable style={styles.addBtn} onPress={onImport}>
+            <Text style={styles.addBtnText}>＋ 取り込む</Text>
+          </Pressable>
+        </View>
       </View>
 
       {items === null ? (
@@ -169,32 +262,13 @@ export function DeckList() {
         </View>
       ) : (
         <FlatList
+          key={viewMode}
           data={items}
           keyExtractor={(it) => String(it.deck.id)}
-          numColumns={2}
-          columnWrapperStyle={styles.row}
+          numColumns={cols}
+          columnWrapperStyle={cols > 1 ? styles.row : undefined}
           contentContainerStyle={styles.grid}
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.card}
-              onPress={() => setView({ name: "viewer", deckId: item.deck.id })}
-              onLongPress={() => onLongPress(item.deck)}
-            >
-              <View style={styles.coverWrap}>
-                {item.cover ? (
-                  <Image source={{ uri: item.cover }} style={styles.cover} resizeMode="cover" />
-                ) : (
-                  <View style={[styles.cover, styles.coverPlaceholder]}>
-                    <Text style={styles.muted}>PDF</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.cardName} numberOfLines={2}>
-                {item.deck.name}
-              </Text>
-              <Text style={styles.cardCount}>{item.count} 問</Text>
-            </Pressable>
-          )}
+          renderItem={viewMode === "list" ? renderList : renderGrid}
         />
       )}
 
@@ -220,6 +294,15 @@ const styles = StyleSheet.create({
   },
   brand: { fontSize: 22, fontWeight: "800", color: colors.text },
   brandSub: { fontSize: 12, color: colors.textSub },
+  headerBtns: { flexDirection: "row", alignItems: "center", gap: 8 },
+  viewBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  viewBtnText: { color: colors.text, fontWeight: "600" },
   addBtn: { backgroundColor: colors.sand, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
   addBtnText: { color: "#fff", fontWeight: "700" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 6 },
@@ -238,8 +321,26 @@ const styles = StyleSheet.create({
   },
   cover: { width: "100%", height: "100%" },
   coverPlaceholder: { alignItems: "center", justifyContent: "center" },
-  cardName: { marginTop: 6, fontSize: 14, fontWeight: "600", color: colors.text },
+  cardName: { marginTop: 6, fontSize: 13, fontWeight: "600", color: colors.text },
   cardCount: { fontSize: 12, color: colors.textSub },
+  listRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  listCover: {
+    width: 44,
+    height: 60,
+    borderRadius: 6,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  listInfo: { flex: 1 },
+  listName: { fontSize: 15, fontWeight: "600", color: colors.text },
   footer: { flexDirection: "row", justifyContent: "space-around", paddingVertical: 10 },
   footerLinkText: { color: colors.muted, fontSize: 13 },
 });

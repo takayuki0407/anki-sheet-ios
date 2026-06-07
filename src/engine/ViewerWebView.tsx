@@ -33,11 +33,12 @@ interface Props {
   open: ViewerOpenArgs | null;
   onBookReady?: (pageCount: number, page: number) => void;
   onPageChanged?: (page: number) => void;
+  onZoomChanged?: (zoom: number) => void;
   onError?: (msg: string) => void;
 }
 
 export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebView(
-  { engineUri, open, onBookReady, onPageChanged, onError },
+  { engineUri, open, onBookReady, onPageChanged, onZoomChanged, onError },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -76,7 +77,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
 
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
-      let m: { type?: string; page?: number; pageCount?: number; message?: string };
+      let m: { type?: string; page?: number; pageCount?: number; zoom?: number; message?: string };
       try {
         m = JSON.parse(e.nativeEvent.data);
       } catch {
@@ -93,12 +94,15 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         case "page-changed":
           onPageChanged?.(m.page ?? 0);
           break;
+        case "zoom-changed":
+          onZoomChanged?.(m.zoom ?? 1);
+          break;
         case "error":
           onError?.(String(m.message ?? "engine error"));
           break;
       }
     },
-    [sendOpen, onBookReady, onPageChanged, onError],
+    [sendOpen, onBookReady, onPageChanged, onZoomChanged, onError],
   );
 
   return (

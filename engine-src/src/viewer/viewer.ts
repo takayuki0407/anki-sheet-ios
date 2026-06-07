@@ -68,11 +68,31 @@ export class Viewer {
   private views: PageView[] = [];
   private io: IntersectionObserver | null = null;
   private scrollRaf = 0;
+  // one-finger axis-locked pan + inertial fling (ported from the original viewerGestures)
+  private pan = {
+    active: false,
+    mode: "none" as "none" | "vertical" | "free",
+    panned: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    lastT: 0,
+    vx: 0,
+    vy: 0,
+    raf: 0,
+  };
+  // two-finger pinch zoom
+  private pinch = { active: false, startDist: 1, startZoom: 1 };
 
   constructor(root: HTMLElement, emit: Emit) {
     this.root = root;
     this.emit = emit;
     this.root.addEventListener("scroll", this.onScroll, { passive: true });
+    this.root.addEventListener("touchstart", this.onTouchStart, { passive: false });
+    this.root.addEventListener("touchmove", this.onTouchMove, { passive: false });
+    this.root.addEventListener("touchend", this.onTouchEnd, { passive: true });
+    this.root.addEventListener("touchcancel", this.onTouchEnd, { passive: true });
     window.addEventListener("resize", this.onResize);
   }
 
@@ -301,6 +321,130 @@ export class Viewer {
     }
   };
 
+  // ---- touch gestures: axis-locked one-finger pan + fling, two-finger pinch zoom ----
+
+  private touchDist(a: Touch, b: Touch): number {
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  }
+
+  private stopFling(): void {
+    if (this.pan.raf) cancelAnimationFrame(this.pan.raf);
+    this.pan.raf = 0;
+  }
+
+  private onTouchStart = (e: TouchEvent): void => {
+    this.stopFling();
+    if (e.touches.length >= 2) {
+      this.pan.active = false;
+      this.pinch.active = true;
+      this.pinch.startDist = this.touchDist(e.touches[0], e.touches[1]) || 1;
+      this.pinch.startZoom = this.zoom;
+      e.preventDefault();
+      return;
+    }
+    const t = e.touches[0];
+    this.pan.active = true;
+    this.pan.mode = "none";
+    this.pan.panned = false;
+    this.pan.startX = this.pan.lastX = t.clientX;
+    this.pan.startY = this.pan.lastY = t.clientY;
+    this.pan.vx = this.pan.vy = 0;
+    this.pan.lastT = performance.now();
+  };
+
+  private onTouchMove = (e: TouchEvent): void => {
+    if (this.pinch.active && e.touches.length >= 2) {
+      const d = this.touchDist(e.touches[0], e.touches[1]);
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      this.zoomAt(clamp(this.pinch.startZoom * (d / this.pinch.startDist), 0.5, 4), cx, cy);
+      e.preventDefault();
+      return;
+    }
+    if (!this.pan.active || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (this.pan.mode === "none") {
+      const dx = t.clientX - this.pan.startX;
+      const dy = t.clientY - this.pan.startY;
+      if (Math.hypot(dx, dy) < 6) return; // a tap (under threshold) still clicks a mask
+      // initial drag steeper than 45deg -> vertical-only (no sideways drift); else free 2D
+      this.pan.mode = Math.abs(dx) >= Math.abs(dy) ? "free" : "vertical";
+      this.pan.panned = true;
+    }
+    const now = performance.now();
+    const dt = Math.max(1, now - this.pan.lastT);
+    const mdx = t.clientX - this.pan.lastX;
+    const mdy = t.clientY - this.pan.lastY;
+    this.pan.lastX = t.clientX;
+    this.pan.lastY = t.clientY;
+    this.pan.lastT = now;
+    this.pan.vy = 0.8 * (mdy / dt) + 0.2 * this.pan.vy;
+    this.pan.vx = this.pan.mode === "free" ? 0.8 * (mdx / dt) + 0.2 * this.pan.vx : 0;
+    this.root.scrollTop -= mdy;
+    if (this.pan.mode === "free") this.root.scrollLeft -= mdx;
+    e.preventDefault();
+  };
+
+  private onTouchEnd = (e: TouchEvent): void => {
+    if (this.pinch.active) {
+      if (e.touches.length >= 2) return;
+      this.pinch.active = false;
+      if (e.touches.length === 1) {
+        const t = e.touches[0]; // one finger remains -> begin a fresh pan from it
+        this.pan.active = true;
+        this.pan.mode = "none";
+        this.pan.panned = false;
+        this.pan.startX = this.pan.lastX = t.clientX;
+        this.pan.startY = this.pan.lastY = t.clientY;
+        this.pan.lastT = performance.now();
+      }
+      return;
+    }
+    if (!this.pan.active || e.touches.length > 0) return;
+    this.pan.active = false;
+    if (!this.pan.panned) return;
+    // swallow the click some WebKit builds synthesize after a drag (don't toggle a mask)
+    const swallow = (ev: Event) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+    };
+    this.root.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => this.root.removeEventListener("click", swallow, true), 0);
+    if (performance.now() - this.pan.lastT > 80) this.pan.vx = this.pan.vy = 0;
+    let mvx = clamp(this.pan.vx, -5, 5);
+    let mvy = clamp(this.pan.vy, -5, 5);
+    if (Math.hypot(mvx, mvy) < 0.05) return;
+    let prev = performance.now();
+    const step = (): void => {
+      const now = performance.now();
+      const dt = now - prev;
+      prev = now;
+      const decay = Math.pow(0.997, dt);
+      mvx *= decay;
+      mvy *= decay;
+      const bt = this.root.scrollTop;
+      const bl = this.root.scrollLeft;
+      this.root.scrollTop -= mvy * dt;
+      if (this.pan.mode === "free") this.root.scrollLeft -= mvx * dt;
+      const moved = this.root.scrollTop !== bt || this.root.scrollLeft !== bl;
+      this.pan.raf = moved && Math.hypot(mvx, mvy) > 0.02 ? requestAnimationFrame(step) : 0;
+    };
+    this.pan.raf = requestAnimationFrame(step);
+  };
+
+  /** Zoom toward a screen point (pinch), keeping that content point under the fingers. */
+  private zoomAt(nz: number, cx: number, cy: number): void {
+    if (Math.abs(nz - this.zoom) < 0.001) return;
+    const rect = this.root.getBoundingClientRect();
+    const fracX = (this.root.scrollLeft + (cx - rect.left)) / (this.root.scrollWidth || 1);
+    const fracY = (this.root.scrollTop + (cy - rect.top)) / (this.root.scrollHeight || 1);
+    this.zoom = clamp(nz, 0.5, 4);
+    this.relayout();
+    this.root.scrollLeft = fracX * (this.root.scrollWidth || 1) - (cx - rect.left);
+    this.root.scrollTop = fracY * (this.root.scrollHeight || 1) - (cy - rect.top);
+    this.emit({ type: "zoom-changed", zoom: this.zoom });
+  }
+
   // ---- public command surface (called from the bridge) ----
 
   goToPage(n: number, doEmit = true): void {
@@ -343,6 +487,7 @@ export class Viewer {
       const v = this.views[this.current];
       if (v) this.root.scrollTop = v.el.offsetTop;
     }
+    this.emit({ type: "zoom-changed", zoom: this.zoom });
   }
 
   setSheet(on: boolean): void {
@@ -364,6 +509,7 @@ export class Viewer {
       cancelAnimationFrame(this.scrollRaf);
       this.scrollRaf = 0;
     }
+    this.stopFling();
     if (this.doc) {
       this.doc.loadingTask.destroy().catch(() => undefined);
       this.doc = null;
