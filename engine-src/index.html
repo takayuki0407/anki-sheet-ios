@@ -101,17 +101,11 @@
         left: 0;
         right: 0;
         z-index: 8;
-        /* イルカ-style camouflage: a light translucent base + fine same-red vertical stripes. Red
-           answer text blends into the red stripes while it stays light and black text reads.
-           Translucent (no multiply) so the page shows through. */
-        background-color: rgba(255, 150, 150, 0.28);
-        background-image: repeating-linear-gradient(
-          90deg,
-          rgba(200, 0, 0, 0.5) 0,
-          rgba(200, 0, 0, 0.5) 1.2px,
-          rgba(200, 0, 0, 0) 1.2px,
-          rgba(200, 0, 0, 0) 3px
-        );
+        /* イルカ-style camouflage: a translucent pink-red overlay (plain alpha blend, no multiply,
+           no stripes). Saturated answer text (magenta/red) differs from the tinted background only
+           in CHROMA so it fades to a faint trace, while black text keeps its LUMINANCE contrast and
+           stays readable. (Opacity controls how faint the answers get.) */
+        background: rgba(230, 95, 115, 0.6);
         border-radius: 6px;
         box-shadow: 0 0 0 2px rgba(214, 51, 132, 0.55) inset;
         touch-action: none;
