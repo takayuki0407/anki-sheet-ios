@@ -91,11 +91,17 @@ export function sampleSegments(px: PagePixels, box: Rect, cfg: DeckColorConfig):
   let bandPx = 0;
   const segments: Rect[] = [];
   const minSegW = Math.max(2, Math.round((box.h || 0) * 0.18)); // drop antialiasing slivers
+  // A colored span is ended only by a *substantial* run of black ink (a real separator like
+  // a full-width "（" or a kanji). A thin black mark inside an answer (中点・, 、, etc.) is
+  // bridged so a contiguous red phrase stays ONE mask. A very wide gap also ends the span.
+  const blackBudget = Math.max(30, (box.h || 0) * (box.h || 0) * 0.05);
+  const maxGap = Math.max(minSegW, Math.round((box.h || 0) * 1.4));
 
   let start = -1;
   let lastRed = -1;
   let segMinY = Infinity;
   let segMaxY = -Infinity;
+  let gapBlack = 0; // black pixels accumulated since the last colored column
   const close = () => {
     if (start >= 0 && lastRed >= start && segMaxY >= segMinY) {
       const w = lastRed - start + 1;
@@ -105,11 +111,12 @@ export function sampleSegments(px: PagePixels, box: Rect, cfg: DeckColorConfig):
     lastRed = -1;
     segMinY = Infinity;
     segMaxY = -Infinity;
+    gapBlack = 0;
   };
 
   for (let x = x0; x < x1; x++) {
     let colRed = false;
-    let colInk = false;
+    let colBlack = 0;
     let colMinY = Infinity;
     let colMaxY = -Infinity;
     for (let y = y0; y < y1; y++) {
@@ -118,24 +125,27 @@ export function sampleSegments(px: PagePixels, box: Rect, cfg: DeckColorConfig):
       const g = data[i + 1];
       const b = data[i + 2];
       if (isBackground(r, g, b)) continue;
-      colInk = true;
       inkPx++;
       if (isInBand(r, g, b, cfg)) {
         colRed = true;
         bandPx++;
         if (y < colMinY) colMinY = y;
         if (y > colMaxY) colMaxY = y;
+      } else {
+        colBlack++;
       }
     }
     if (colRed) {
       if (start < 0) start = x;
       lastRed = x;
+      gapBlack = 0;
       if (colMinY < segMinY) segMinY = colMinY;
       if (colMaxY > segMaxY) segMaxY = colMaxY;
-    } else if (colInk) {
-      close(); // a column of black ink ends the current colored span
+    } else if (start >= 0) {
+      // non-colored column: bridge thin marks, but end the span at real black separators
+      gapBlack += colBlack;
+      if (gapBlack > blackBudget || x - lastRed > maxGap) close();
     }
-    // empty (background) columns are bridged
   }
   close();
   return { inkPx, bandPx, segments };
