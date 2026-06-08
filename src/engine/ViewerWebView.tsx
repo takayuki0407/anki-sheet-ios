@@ -211,6 +211,9 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         // in-page (the viewport disables native zoom); insets are off so doc (0,0) = WebView top.
         scrollEnabled
         directionalLockEnabled
+        // Lower scroll resistance so a flick glides farther (1=frictionless). iOS default is
+        // 'normal' (0.998); 0.999 ≈ doubles the coast distance for long 縦読み documents.
+        decelerationRate={0.999}
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         style={styles.fill}
