@@ -78,17 +78,6 @@ export class Viewer {
   private scrollRaf = 0;
   // two-finger pinch zoom (smooth: CSS transform during the gesture, real relayout on end)
   private pinch = { active: false, startDist: 1, startZoom: 1, fcx: 0, fcy: 0, scale: 1 };
-  // One-finger movement: the finger drives horizontal (JS scrollLeft) while the browser scrolls
-  // vertically (native momentum, smooth) — so diagonal panning follows the finger. The horizontal
-  // is suppressed ONLY for a quick, clearly-vertical flick ("vlock"), so a careless fast vertical
-  // swipe doesn't drift sideways. Everything else ("free") follows the finger in 2D.
-  private hpan = {
-    startX: 0,
-    startY: 0,
-    lastX: 0,
-    startT: 0,
-    axis: "none" as "none" | "vlock" | "free",
-  };
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
@@ -113,13 +102,15 @@ export class Viewer {
   // Study tracking: starred answers (long-press a mask) + a review-only mode that masks just them.
   private starred = new Set<number>();
   private starReview = false;
+  // touchmove is attached only while pinching / drawing (a non-passive touchmove listener slows the
+  // browser's native scroll). One-finger scrolling runs with NO touchmove listener → full Safari-like.
+  private moveAttached = false;
 
   constructor(root: HTMLElement, emit: Emit) {
     this.root = root;
     this.emit = emit;
     this.root.addEventListener("scroll", this.onScroll, { passive: true });
     this.root.addEventListener("touchstart", this.onTouchStart, { passive: false });
-    this.root.addEventListener("touchmove", this.onTouchMove, { passive: false });
     this.root.addEventListener("touchend", this.onTouchEnd, { passive: true });
     this.root.addEventListener("touchcancel", this.onTouchEnd, { passive: true });
     window.addEventListener("resize", this.onResize);
@@ -446,6 +437,21 @@ export class Viewer {
     return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   }
 
+  // Attach the (non-passive) touchmove handler only while a pinch / draw is in progress, so plain
+  // one-finger scrolling never has a non-passive touchmove slowing the native scroller.
+  private startMove(): void {
+    if (!this.moveAttached) {
+      this.root.addEventListener("touchmove", this.onTouchMove, { passive: false });
+      this.moveAttached = true;
+    }
+  }
+  private stopMove(): void {
+    if (this.moveAttached) {
+      this.root.removeEventListener("touchmove", this.onTouchMove);
+      this.moveAttached = false;
+    }
+  }
+
   private onTouchStart = (e: TouchEvent): void => {
     // Mask editing: a drag draws a rectangle on the page under the finger (add / 範囲削除).
     if (this.editMode && this.drawMode && e.touches.length === 1) {
@@ -471,6 +477,7 @@ export class Viewer {
           y,
           el,
         };
+        this.startMove();
         this.positionDraw();
         e.preventDefault();
         return;
@@ -488,14 +495,10 @@ export class Viewer {
       this.pinch.fcy = this.root.scrollTop + (cy - rect.top);
       if (this.contentEl)
         this.contentEl.style.transformOrigin = `${this.pinch.fcx}px ${this.pinch.fcy}px`;
+      this.startMove();
       e.preventDefault();
     }
-    // One-finger: record the start so the first move can classify the gesture (vlock vs free).
-    const t = e.touches[0];
-    this.hpan.startX = this.hpan.lastX = t.clientX;
-    this.hpan.startY = t.clientY;
-    this.hpan.startT = performance.now();
-    this.hpan.axis = "none";
+    // One-finger drag → fully native 2D scrolling (browser/UIScrollView); nothing to do here.
   };
 
   private onTouchMove = (e: TouchEvent): void => {
@@ -516,23 +519,7 @@ export class Viewer {
       e.preventDefault();
       return;
     }
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    if (this.hpan.axis === "none") {
-      const dx = t.clientX - this.hpan.startX;
-      const dy = t.clientY - this.hpan.startY;
-      const dist = Math.hypot(dx, dy);
-      if (dist < 10) return; // wait until the gesture's intent is clear
-      const speed = dist / Math.max(1, performance.now() - this.hpan.startT); // px/ms
-      // Lock to vertical ONLY for a quick + clearly-vertical flick; otherwise follow the finger.
-      this.hpan.axis = Math.abs(dy) > Math.abs(dx) * 2 && speed > 0.5 ? "vlock" : "free";
-    }
-    if (this.hpan.axis === "free") {
-      // Drive horizontal with the finger; the browser still scrolls vertically (pan-y), so a
-      // diagonal drag moves in 2D. (No preventDefault → native vertical momentum stays smooth.)
-      this.root.scrollLeft -= t.clientX - this.hpan.lastX;
-    }
-    this.hpan.lastX = t.clientX;
+    // One-finger move → let the browser scroll natively in 2D (Safari-like momentum).
   };
 
   private onTouchEnd = (e: TouchEvent): void => {
@@ -555,12 +542,11 @@ export class Viewer {
       }
       this.drawMode = null;
       this.root.classList.remove("drawing");
-      return;
-    }
-    if (this.pinch.active && e.touches.length < 2) {
+    } else if (this.pinch.active && e.touches.length < 2) {
       this.pinch.active = false;
       this.commitPinch();
     }
+    if (e.touches.length === 0) this.stopMove(); // all fingers up → back to pure-native scrolling
   };
 
   /** Commit a pinch: replace the transient transform with a real relayout at the final
@@ -807,6 +793,7 @@ export class Viewer {
       cancelAnimationFrame(this.scrollRaf);
       this.scrollRaf = 0;
     }
+    this.stopMove();
     if (this.doc) {
       this.doc.loadingTask.destroy().catch(() => undefined);
       this.doc = null;

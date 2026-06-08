@@ -33,9 +33,10 @@
         overflow: auto;
         overscroll-behavior: contain;
         background: #525659;
-        /* Vertical = native momentum scrolling (smooth, no sideways drift because pan-y forbids
-           horizontal). Horizontal pan (when zoomed) + two-finger pinch are handled in JS. */
-        touch-action: pan-y;
+        /* Fully native 2D scrolling (Safari-like): the browser/UIScrollView owns one-finger pan +
+           momentum on both axes; we only own two-finger pinch (its touchmove preventDefaults).
+           pan-x pan-y permits panning but not native pinch-zoom. */
+        touch-action: pan-x pan-y;
         -webkit-overflow-scrolling: touch;
       }
       /* While drawing a mask region (edit), block native scroll so the drag draws. */
