@@ -1,4 +1,4 @@
-// 取り込み — pick a red-sheet PDF, choose the answer color(s) (自動 / 複数選択), run color
+// 取り込み — pick a red-sheet PDF, choose the answer color (自動 / preset), run color
 // detection (live progress + cancel), preview ANY page of the result, name the book, and save.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -17,12 +17,7 @@ import { useDetectionEngine } from "../engine/EngineProvider";
 import { stagePdf } from "../engine/setupEngine";
 import { importBookmarks, importDeck } from "../db/repo";
 import { syncNewDeck } from "../sync/deck";
-import {
-  COLOR_PRESETS,
-  DEFAULT_MAGENTA_BAND,
-  type DeckColorConfig,
-  type DetectedCloze,
-} from "../types";
+import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "../types";
 import type { PdfDetectionResult } from "../engine/protocol";
 import { colors } from "../ui/theme";
 
@@ -38,27 +33,6 @@ function colorForPreset(key: string): DeckColorConfig {
   return p ? { ...DEFAULT_MAGENTA_BAND, hueTarget: p.hueTarget, hueTol: p.hueTol } : DEFAULT_MAGENTA_BAND;
 }
 
-// Merge clozes from several single-color passes, dropping ONLY true duplicates (an answer two
-// colors both matched) — kept unless an already-kept cloze on the same page actually OVERLAPS it.
-// Distinct answers never overlap, so none are lost. (Only used when 2+ colors are selected.)
-function mergeClozes(lists: DetectedCloze[][]): DetectedCloze[] {
-  const out: DetectedCloze[] = [];
-  for (const list of lists) {
-    for (const c of list) {
-      const dup = out.some(
-        (o) =>
-          o.pageIndex === c.pageIndex &&
-          c.bbox.x < o.bbox.x + o.bbox.w &&
-          c.bbox.x + c.bbox.w > o.bbox.x &&
-          c.bbox.y < o.bbox.y + o.bbox.h &&
-          c.bbox.y + c.bbox.h > o.bbox.y,
-      );
-      if (!dup) out.push(c);
-    }
-  }
-  return out;
-}
-
 export function ImportWizard() {
   const setView = useApp((s) => s.setView);
   const engine = useDetectionEngine();
@@ -70,9 +44,9 @@ export function ImportWizard() {
   const [errMsg, setErrMsg] = useState("");
   const [saving, setSaving] = useState(false);
   // Answer-color choice made BEFORE detecting (the user picks; no silent auto-detect):
-  // 自動 (probe + pick one) OR one-or-more manual presets (union of their detections).
+  // 自動 (probe + pick one) OR a single manual preset.
   const [useAuto, setUseAuto] = useState(true);
-  const [manualKeys, setManualKeys] = useState<Set<string>>(new Set(["red"]));
+  const [manualKey, setManualKey] = useState("red");
   const [primaryColor, setPrimaryColor] = useState<DeckColorConfig>(DEFAULT_MAGENTA_BAND);
   // Result-screen preview: a rendered page (with detection) the user can flip through (any page).
   const [previewPage, setPreviewPage] = useState(0);
@@ -81,19 +55,8 @@ export function ImportWizard() {
   const abortRef = useRef<AbortController | null>(null);
   const runToken = useRef(0);
 
-  const toggleManual = (key: string) => {
-    setUseAuto(false);
-    setManualKeys((s) => {
-      const n = new Set(s);
-      if (n.has(key)) n.delete(key);
-      else n.add(key);
-      if (!n.size) n.add(key); // keep at least one manual color selected
-      return n;
-    });
-  };
-
-  // Detect for the chosen color(s): 自動 probes one color; manual unions each selected color (one
-  // pass per color). Cancel returns to the color chooser so the user can adjust + retry.
+  // Detect for the chosen color: 自動 probes + picks one; manual uses the selected preset.
+  // Cancel returns to the color chooser so the user can adjust + retry.
   const runDetect = useCallback(
     async (uri: string) => {
       abortRef.current?.abort();
@@ -118,27 +81,17 @@ export function ImportWizard() {
           res = det;
           primary = det.color ?? DEFAULT_MAGENTA_BAND;
         } else {
-          const configs = [...manualKeys].map(colorForPreset);
-          const lists: DetectedCloze[][] = [];
-          let base: PdfDetectionResult | null = null;
-          for (let i = 0; i < configs.length; i++) {
-            const r = await engine.detectAll(
-              { url: uri, color: configs[i] },
-              (p) => {
-                if (myRun === runToken.current)
-                  setProgress(
-                    `${configs.length > 1 ? `色 ${i + 1}/${configs.length}・` : ""}検出 ${p.page}/${p.total} … ${p.found}件`,
-                  );
-              },
-              ac.signal,
-            );
-            if (myRun !== runToken.current) return;
-            lists.push(r.clozes);
-            if (!base) base = r;
-          }
-          // Single color: use the detection AS-IS (no merge step); only union when 2+ colors.
-          res = { ...base!, clozes: configs.length > 1 ? mergeClozes(lists) : lists[0] };
-          primary = configs[0];
+          const cfg = colorForPreset(manualKey);
+          const r = await engine.detectAll(
+            { url: uri, color: cfg },
+            (p) => {
+              if (myRun === runToken.current) setProgress(`検出 ${p.page}/${p.total} … ${p.found}件`);
+            },
+            ac.signal,
+          );
+          if (myRun !== runToken.current) return;
+          res = r;
+          primary = cfg;
         }
         setPrimaryColor(primary);
         setResult(res);
@@ -157,7 +110,7 @@ export function ImportWizard() {
         if (abortRef.current === ac) abortRef.current = null;
       }
     },
-    [engine, useAuto, manualKeys],
+    [engine, useAuto, manualKey],
   );
 
   const pick = useCallback(async () => {
@@ -238,12 +191,15 @@ export function ImportWizard() {
         <Text style={[styles.chipText, useAuto && styles.chipTextOn]}>自動</Text>
       </Pressable>
       {COLOR_PRESETS.map((p) => {
-        const on = !useAuto && manualKeys.has(p.key);
+        const on = !useAuto && manualKey === p.key;
         return (
           <Pressable
             key={p.key}
             style={[styles.chip, on && styles.chipOn]}
-            onPress={() => toggleManual(p.key)}
+            onPress={() => {
+              setUseAuto(false);
+              setManualKey(p.key);
+            }}
           >
             <Text style={[styles.chipText, on && styles.chipTextOn]}>{p.label}</Text>
           </Pressable>
@@ -264,7 +220,7 @@ export function ImportWizard() {
       {phase === "idle" && (
         <ScrollView contentContainerStyle={styles.pad}>
           <Text style={styles.help}>
-            赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選び、次の画面で答えの色（自動／赤・マゼンタなど、複数可）を選んで検出します。
+            赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選び、次の画面で答えの色（自動／赤・マゼンタなど）を選んで検出します。
           </Text>
           <Pressable style={styles.primary} onPress={pick} disabled={!engine.ready}>
             <Text style={styles.primaryText}>{engine.ready ? "PDFを選ぶ" : "エンジン準備中…"}</Text>
@@ -274,11 +230,11 @@ export function ImportWizard() {
 
       {phase === "configuring" && (
         <ScrollView contentContainerStyle={styles.pad}>
-          <Text style={styles.help}>「{name || "無題"}」を取り込みます。答えの色を選んでください（複数選択できます）。</Text>
+          <Text style={styles.help}>「{name || "無題"}」を取り込みます。答えの色を選んでください。</Text>
           <Text style={styles.label}>答えの色</Text>
           {ColorChooser}
           <Text style={styles.muted}>
-            自動はシステムが答えの色を判定します。色を選ぶと、選んだ色（複数可）で検出します。
+            自動はシステムが答えの色を判定します。手動で色を選ぶこともできます。
           </Text>
           <Pressable style={styles.primary} onPress={() => stagedUri && runDetect(stagedUri)}>
             <Text style={styles.primaryText}>取り込む</Text>
