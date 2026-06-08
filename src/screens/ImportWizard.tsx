@@ -1,6 +1,6 @@
-// 取り込み — pick a red-sheet PDF, run color detection (with live progress + cancel),
-// preview the result, choose a color preset (re-detects), name the book, and save.
-import { useCallback, useRef, useState } from "react";
+// 取り込み — pick a red-sheet PDF, choose the answer color(s) (自動 / 複数選択), run color
+// detection (live progress + cancel), preview ANY page of the result, name the book, and save.
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -17,11 +17,16 @@ import { useDetectionEngine } from "../engine/EngineProvider";
 import { stagePdf } from "../engine/setupEngine";
 import { importBookmarks, importDeck } from "../db/repo";
 import { syncNewDeck } from "../sync/deck";
-import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "../types";
+import {
+  COLOR_PRESETS,
+  DEFAULT_MAGENTA_BAND,
+  type DeckColorConfig,
+  type DetectedCloze,
+} from "../types";
 import type { PdfDetectionResult } from "../engine/protocol";
 import { colors } from "../ui/theme";
 
-type Phase = "idle" | "detecting" | "review" | "error";
+type Phase = "idle" | "configuring" | "detecting" | "review" | "error";
 
 // Per-file size cap (Pro cloud sync is bounded to 5GB total; a 100MB/file ceiling keeps any
 // single book reasonable for storage + on-device memory during detection).
@@ -33,60 +38,111 @@ function colorForPreset(key: string): DeckColorConfig {
   return p ? { ...DEFAULT_MAGENTA_BAND, hueTarget: p.hueTarget, hueTol: p.hueTol } : DEFAULT_MAGENTA_BAND;
 }
 
-/** Map an (auto-picked) color config back to a preset key so the review chips highlight it. */
-function presetKeyForColor(c: DeckColorConfig): string {
-  const p = COLOR_PRESETS.find((x) => x.hueTarget === c.hueTarget && x.hueTol === c.hueTol);
-  return p?.key ?? "magenta";
+// Merge clozes from several single-color passes, dropping near-duplicates (an answer two colors
+// both matched) by page + rounded bbox so a glyph near a hue boundary isn't masked twice.
+function mergeClozes(lists: DetectedCloze[][]): DetectedCloze[] {
+  const seen = new Set<string>();
+  const out: DetectedCloze[] = [];
+  for (const list of lists) {
+    for (const c of list) {
+      const key = `${c.pageIndex}:${Math.round(c.bbox.x)}:${Math.round(c.bbox.y)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(c);
+    }
+  }
+  return out;
 }
 
 export function ImportWizard() {
   const setView = useApp((s) => s.setView);
   const engine = useDetectionEngine();
   const [phase, setPhase] = useState<Phase>("idle");
-  const [presetKey, setPresetKey] = useState("magenta");
   const [name, setName] = useState("");
   const [stagedUri, setStagedUri] = useState<string | null>(null);
   const [progress, setProgress] = useState("");
   const [result, setResult] = useState<PdfDetectionResult | null>(null);
-  const [cover, setCover] = useState<string | undefined>(undefined);
   const [errMsg, setErrMsg] = useState("");
   const [saving, setSaving] = useState(false);
+  // Answer-color choice made BEFORE detecting (the user picks; no silent auto-detect):
+  // 自動 (probe + pick one) OR one-or-more manual presets (union of their detections).
+  const [useAuto, setUseAuto] = useState(true);
+  const [manualKeys, setManualKeys] = useState<Set<string>>(new Set(["red"]));
+  const [primaryColor, setPrimaryColor] = useState<DeckColorConfig>(DEFAULT_MAGENTA_BAND);
+  // Result-screen preview: a rendered page (with detection) the user can flip through (any page).
+  const [previewPage, setPreviewPage] = useState(0);
+  const [preview, setPreview] = useState<{ dataUrl: string; count: number } | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const runToken = useRef(0);
 
-  // `auto` (first import): the engine picks the answer color before detecting and returns it.
-  // Re-detect from the review screen passes auto=false with the preset the user chose.
+  const toggleManual = (key: string) => {
+    setUseAuto(false);
+    setManualKeys((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      if (!n.size) n.add(key); // keep at least one manual color selected
+      return n;
+    });
+  };
+
+  // Detect for the chosen color(s): 自動 probes one color; manual unions each selected color (one
+  // pass per color). Cancel returns to the color chooser so the user can adjust + retry.
   const runDetect = useCallback(
-    async (uri: string, key: string, auto = false) => {
-      abortRef.current?.abort(); // cancel any in-flight run (e.g. rapid preset switch)
+    async (uri: string) => {
+      abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
       const myRun = ++runToken.current;
       setPhase("detecting");
-      setProgress(auto ? "答えの色を判定中…" : "PDFを解析中…");
       setResult(null);
       try {
-        // Detect first, then render the cover — they share one engine, so running them
-        // sequentially avoids contention (and a cancelled run won't keep rendering a cover).
-        const detection = await engine.detectAll(
-          auto ? { url: uri, auto: true } : { url: uri, color: colorForPreset(key) },
-          (p) => {
-            if (myRun === runToken.current) setProgress(`検出 ${p.page}/${p.total} … ${p.found}件`);
-          },
-          ac.signal,
-        );
-        if (myRun !== runToken.current) return; // superseded by a newer run
-        // Reflect the auto-picked color in the preset chips (and use it when saving the deck).
-        if (auto && detection.color) setPresetKey(presetKeyForColor(detection.color));
-        const coverUrl = await engine.cover({ url: uri }).catch(() => undefined);
-        if (myRun !== runToken.current) return;
-        setResult(detection);
-        setCover(coverUrl);
+        let res: PdfDetectionResult;
+        let primary: DeckColorConfig;
+        if (useAuto) {
+          setProgress("答えの色を判定中…");
+          const det = await engine.detectAll(
+            { url: uri, auto: true },
+            (p) => {
+              if (myRun === runToken.current) setProgress(`検出 ${p.page}/${p.total} … ${p.found}件`);
+            },
+            ac.signal,
+          );
+          if (myRun !== runToken.current) return;
+          res = det;
+          primary = det.color ?? DEFAULT_MAGENTA_BAND;
+        } else {
+          const configs = [...manualKeys].map(colorForPreset);
+          const lists: DetectedCloze[][] = [];
+          let base: PdfDetectionResult | null = null;
+          for (let i = 0; i < configs.length; i++) {
+            const r = await engine.detectAll(
+              { url: uri, color: configs[i] },
+              (p) => {
+                if (myRun === runToken.current)
+                  setProgress(
+                    `${configs.length > 1 ? `色 ${i + 1}/${configs.length}・` : ""}検出 ${p.page}/${p.total} … ${p.found}件`,
+                  );
+              },
+              ac.signal,
+            );
+            if (myRun !== runToken.current) return;
+            lists.push(r.clozes);
+            if (!base) base = r;
+          }
+          res = { ...base!, clozes: mergeClozes(lists) };
+          primary = configs[0];
+        }
+        setPrimaryColor(primary);
+        setResult(res);
+        setPreviewPage(0);
+        setPreview(null);
         setPhase("review");
       } catch (e) {
         if (myRun !== runToken.current) return;
         if (e instanceof Error && e.message === "cancelled") {
-          setPhase("idle");
+          setPhase("configuring");
           return;
         }
         setErrMsg(e instanceof Error ? e.message : String(e));
@@ -95,7 +151,7 @@ export function ImportWizard() {
         if (abortRef.current === ac) abortRef.current = null;
       }
     },
-    [engine],
+    [engine, useAuto, manualKeys],
   );
 
   const pick = useCallback(async () => {
@@ -115,37 +171,50 @@ export function ImportWizard() {
     const uri = await stagePdf(asset.uri);
     setStagedUri(uri);
     setName(asset.name.replace(/\.pdf$/i, ""));
-    runDetect(uri, presetKey, true); // first import → auto-pick the color
-  }, [presetKey, runDetect]);
+    setPhase("configuring"); // choose the answer color(s), then 取り込む
+  }, []);
 
-  const changePreset = useCallback(
-    (key: string) => {
-      setPresetKey(key);
-      if (stagedUri) runDetect(stagedUri, key);
-    },
-    [stagedUri, runDetect],
-  );
+  // Render the preview page (with detection) whenever the page / primary color changes (debounced).
+  // Uses the primary color — for a multi-color import the saved deck still has the full union.
+  useEffect(() => {
+    if (phase !== "review" || !stagedUri || !engine.ready) return;
+    let cancelled = false;
+    setPreviewing(true);
+    const id = setTimeout(async () => {
+      try {
+        const r = await engine.preview({ url: stagedUri, color: primaryColor, page: previewPage });
+        if (!cancelled) setPreview(r);
+      } catch {
+        /* preview is best-effort */
+      } finally {
+        if (!cancelled) setPreviewing(false);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [phase, stagedUri, primaryColor, previewPage, engine]);
 
   const save = useCallback(async () => {
     if (!result || !stagedUri) return;
     setSaving(true);
     try {
+      const cover = await engine.cover({ url: stagedUri }).catch(() => undefined);
       const deckId = await importDeck({
         name: name.trim() || "無題",
         stagedPdfUri: stagedUri,
         pageCount: result.pageCount,
         pageW: result.pageW,
         pageH: result.pageH,
-        color: colorForPreset(presetKey),
+        color: primaryColor,
         clozes: result.clozes,
         coverDataUrl: cover,
       });
-      // Import the PDF's built-in outline (目次) as bookmarks, if it has one.
       if (result.outline.length) await importBookmarks(deckId, result.outline);
-      // Cloud sync (Pro): reserve the account-global slot + upload, in the background. Best-effort
-      // and fail-open — a sync hiccup (or being signed out) never blocks the local import.
+      // Cloud sync (Pro): reserve the slot + upload in the background; best-effort + fail-open.
       void syncNewDeck(deckId, name.trim() || "無題", result.pageCount).catch(() => {});
-      setView({ name: "viewer", deckId });
+      setView({ name: "viewer", deckId }); // 保存して開く
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : String(e));
       setStagedUri(null); // staged file may have been consumed; force a fresh pick
@@ -154,21 +223,30 @@ export function ImportWizard() {
     } finally {
       setSaving(false);
     }
-  }, [result, stagedUri, name, presetKey, cover, setView]);
+  }, [result, stagedUri, name, primaryColor, engine, setView]);
 
-  const Presets = (
+  // 答えの色: 自動 + the presets (manual is multi-select). Shared by configure + review screens.
+  const ColorChooser = (
     <View style={styles.presets}>
-      {COLOR_PRESETS.map((p) => (
-        <Pressable
-          key={p.key}
-          style={[styles.chip, presetKey === p.key && styles.chipOn]}
-          onPress={() => changePreset(p.key)}
-        >
-          <Text style={[styles.chipText, presetKey === p.key && styles.chipTextOn]}>{p.label}</Text>
-        </Pressable>
-      ))}
+      <Pressable style={[styles.chip, useAuto && styles.chipOn]} onPress={() => setUseAuto(true)}>
+        <Text style={[styles.chipText, useAuto && styles.chipTextOn]}>自動</Text>
+      </Pressable>
+      {COLOR_PRESETS.map((p) => {
+        const on = !useAuto && manualKeys.has(p.key);
+        return (
+          <Pressable
+            key={p.key}
+            style={[styles.chip, on && styles.chipOn]}
+            onPress={() => toggleManual(p.key)}
+          >
+            <Text style={[styles.chipText, on && styles.chipTextOn]}>{p.label}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
+
+  const pageCount = result?.pageCount ?? 1;
 
   return (
     <View style={styles.c}>
@@ -180,12 +258,27 @@ export function ImportWizard() {
       {phase === "idle" && (
         <ScrollView contentContainerStyle={styles.pad}>
           <Text style={styles.help}>
-            赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選ぶと、答えの色を自動で判定して検出します。検出後に色を変えて再検出もできます。
+            赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選び、次の画面で答えの色（自動／赤・マゼンタなど、複数可）を選んで検出します。
           </Text>
           <Pressable style={styles.primary} onPress={pick} disabled={!engine.ready}>
-            <Text style={styles.primaryText}>
-              {engine.ready ? "PDFを選ぶ" : "エンジン準備中…"}
-            </Text>
+            <Text style={styles.primaryText}>{engine.ready ? "PDFを選ぶ" : "エンジン準備中…"}</Text>
+          </Pressable>
+        </ScrollView>
+      )}
+
+      {phase === "configuring" && (
+        <ScrollView contentContainerStyle={styles.pad}>
+          <Text style={styles.help}>「{name || "無題"}」を取り込みます。答えの色を選んでください（複数選択できます）。</Text>
+          <Text style={styles.label}>答えの色</Text>
+          {ColorChooser}
+          <Text style={styles.muted}>
+            自動はシステムが答えの色を判定します。色を選ぶと、選んだ色（複数可）で検出します。
+          </Text>
+          <Pressable style={styles.primary} onPress={() => stagedUri && runDetect(stagedUri)}>
+            <Text style={styles.primaryText}>取り込む</Text>
+          </Pressable>
+          <Pressable style={styles.ghost} onPress={pick}>
+            <Text style={styles.ghostText}>別のPDFを選ぶ</Text>
           </Pressable>
         </ScrollView>
       )}
@@ -202,28 +295,51 @@ export function ImportWizard() {
 
       {phase === "review" && result && (
         <ScrollView contentContainerStyle={styles.pad}>
-          <View style={styles.reviewRow}>
-            {cover ? (
-              <Image source={{ uri: cover }} style={styles.coverThumb} resizeMode="cover" />
+          <Text style={styles.detected}>{result.clozes.length} 件の答えを検出</Text>
+          <Text style={styles.muted}>
+            {result.pageCount} ページ
+            {result.outline.length > 0 ? ` ・ 目次 ${result.outline.length} 件を取り込み` : ""}
+          </Text>
+
+          <View style={styles.previewBox}>
+            {preview ? (
+              <Image source={{ uri: preview.dataUrl }} style={styles.preview} resizeMode="contain" />
             ) : (
-              <View style={[styles.coverThumb, styles.coverPh]}>
-                <Text style={styles.muted}>PDF</Text>
+              <View style={styles.previewPh}>
+                <ActivityIndicator color={colors.sand} />
               </View>
             )}
-            <View style={styles.reviewInfo}>
-              <Text style={styles.detected}>{result.clozes.length} 件の答えを検出</Text>
-              <Text style={styles.muted}>{result.pageCount} ページ</Text>
-              {result.outline.length > 0 && (
-                <Text style={styles.muted}>目次 {result.outline.length} 件を取り込み</Text>
-              )}
-            </View>
+          </View>
+          <View style={styles.navRow}>
+            <Pressable
+              style={[styles.navBtn, previewPage <= 0 && styles.navOff]}
+              disabled={previewPage <= 0}
+              onPress={() => setPreviewPage((p) => Math.max(0, p - 1))}
+            >
+              <Text style={styles.navText}>← 前</Text>
+            </Pressable>
+            <Text style={styles.muted}>
+              p.{previewPage + 1}/{pageCount}
+              {preview ? ` ・ 検出 ${preview.count} 個` : ""}
+              {previewing ? "（更新中）" : ""}
+            </Text>
+            <Pressable
+              style={[styles.navBtn, previewPage >= pageCount - 1 && styles.navOff]}
+              disabled={previewPage >= pageCount - 1}
+              onPress={() => setPreviewPage((p) => Math.min(pageCount - 1, p + 1))}
+            >
+              <Text style={styles.navText}>次 →</Text>
+            </Pressable>
           </View>
 
           <Text style={styles.label}>本の名前</Text>
           <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="例: 財務諸表論" />
 
           <Text style={styles.label}>答えの色（変更すると再検出）</Text>
-          {Presets}
+          {ColorChooser}
+          <Pressable style={styles.ghost} onPress={() => stagedUri && runDetect(stagedUri)}>
+            <Text style={styles.ghostText}>この色で再検出</Text>
+          </Pressable>
 
           <Pressable style={styles.primary} onPress={save} disabled={saving}>
             <Text style={styles.primaryText}>{saving ? "保存中…" : "保存して開く"}</Text>
@@ -271,12 +387,30 @@ const styles = StyleSheet.create({
   ghostText: { color: colors.ocean, fontSize: 15 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   status: { fontSize: 14, color: colors.textSub },
-  reviewRow: { flexDirection: "row", gap: 14, alignItems: "center" },
-  coverThumb: { width: 90, height: 125, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-  coverPh: { alignItems: "center", justifyContent: "center" },
-  reviewInfo: { flex: 1, gap: 4 },
   detected: { fontSize: 18, fontWeight: "700", color: colors.forest },
   muted: { color: colors.muted, fontSize: 13 },
+  previewBox: {
+    height: 380,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    overflow: "hidden",
+    marginTop: 4,
+  },
+  preview: { width: "100%", height: "100%" },
+  previewPh: { flex: 1, alignItems: "center", justifyContent: "center" },
+  navRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  navBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  navOff: { opacity: 0.4 },
+  navText: { color: colors.ocean, fontSize: 14 },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
