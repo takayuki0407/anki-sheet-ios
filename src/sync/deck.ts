@@ -88,6 +88,26 @@ export async function releaseLocalSlotsOnLogout(): Promise<void> {
   }
 }
 
+/** Pro/admin only: upload any LOCAL book that has no cloud file yet (e.g. imported while Standard,
+ * then upgraded to Pro). Idempotent — skips books that already have a cloud file. Best-effort; never
+ * throws. Backfills the cloud after an upgrade so the books reach the account's other devices. */
+export async function backfillCloudIfPro(): Promise<void> {
+  if (!(await idToken())) return;
+  let acct;
+  try {
+    acct = await listBooks();
+  } catch {
+    return;
+  }
+  if (!(acct.tier === "pro" || acct.tier === "admin")) return; // only Pro can upload files
+  const size = new Map(acct.books.map((b) => [b.book_id, b.size]));
+  const ids = await localBookIds(); // Map<bookId, deckId>
+  for (const [bookId, deckId] of ids) {
+    if ((size.get(bookId) ?? 0) > 0) continue; // already has a cloud file
+    await uploadDeck(bookId, deckId).catch(() => {});
+  }
+}
+
 /** Build the content JSON (everything needed to rebuild the deck except the PDF) from local state. */
 async function buildContent(deckId: number): Promise<DeckContent | null> {
   const [deck, pdf, cards, bms] = await Promise.all([

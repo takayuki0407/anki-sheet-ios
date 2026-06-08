@@ -27,7 +27,7 @@ import {
   updateBookMeta,
   type AccountBook,
 } from "../sync/api";
-import { deckBookId, downloadDeck, localBookIds } from "../sync/deck";
+import { backfillCloudIfPro, deckBookId, downloadDeck, localBookIds } from "../sync/deck";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
 
@@ -88,7 +88,6 @@ export function DeckList() {
   const regenRef = useRef(false);
   // Books in the account that aren't on THIS device yet → one-tap cloud download (Pro).
   const [cloud, setCloud] = useState<AccountBook[]>([]);
-  const [cloudPro, setCloudPro] = useState(false); // account can actually fetch cloud PDFs (pro/admin)
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -109,7 +108,7 @@ export function DeckList() {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
       setCloud(acct.books.filter((b) => !local.has(b.book_id)));
-      setCloudPro(acct.unlimited); // standard accounts don't store cloud PDFs → can't download
+      void backfillCloudIfPro(); // Pro: upload any local book that has no cloud file yet
       // Adopt favorite / latest-opened state set on other devices for books we also have locally.
       let changed = false;
       for (const b of acct.books) {
@@ -127,7 +126,6 @@ export function DeckList() {
       if (changed) await load();
     } catch {
       setCloud([]); // signed out / offline — no cloud section
-      setCloudPro(false);
     }
   }, [load]);
 
@@ -470,11 +468,9 @@ export function DeckList() {
             cloud.length > 0 ? (
               <View style={styles.cloudSection}>
                 <Text style={styles.cloudTitle}>クラウド（他の端末の本）</Text>
-                {!cloudPro && (
-                  <Text style={styles.cloudNote}>
-                    Standardプランはクラウドにファイルを保存しません。これらはアカウントに登録された枠で、取得はできません。不要なら削除して枠を空けられます。
-                  </Text>
-                )}
+                <Text style={styles.cloudNote}>
+                  クラウドに保存済み（Proで取り込み）の本は取り込めます。ファイルの無い本（Standardの枠のみ）は削除して枠を空けられます。
+                </Text>
                 {cloud.map((b) => (
                   <View key={b.book_id} style={styles.cloudRow}>
                     <View style={styles.cloudInfo}>
@@ -483,7 +479,7 @@ export function DeckList() {
                       </Text>
                       {b.device ? <Text style={styles.cloudDevice}>{b.device}</Text> : null}
                     </View>
-                    {cloudPro ? (
+                    {b.size > 0 ? (
                       <Pressable
                         style={styles.cloudBtn}
                         disabled={downloading.has(b.book_id)}
