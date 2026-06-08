@@ -395,10 +395,7 @@ export function DeckList() {
       <View style={styles.header}>
         <View style={styles.brandRow}>
           <Image source={require("../../assets/icon.png")} style={styles.brandIcon} />
-          <View>
-            <Text style={styles.brand}>Anki-sheet</Text>
-            <Text style={styles.brandSub}>赤シート暗記</Text>
-          </View>
+          <Text style={styles.brand}>Anki-sheet</Text>
         </View>
         <View style={styles.headerBtns}>
           <Pressable style={styles.addBtn} onPress={onImport}>
@@ -488,7 +485,6 @@ const styles = StyleSheet.create({
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   brandIcon: { width: 34, height: 34, borderRadius: 8 },
   brand: { fontSize: 22, fontWeight: "800", color: "#b9824f" },
-  brandSub: { fontSize: 12, color: colors.textSub },
   headerBtns: { flexDirection: "row", alignItems: "center", gap: 8 },
   addBtn: { backgroundColor: colors.sand, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 },
   addBtnText: { color: "#fff", fontWeight: "700" },
