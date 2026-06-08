@@ -16,7 +16,6 @@ import { useApp } from "../store/session";
 import { STANDARD_DECK_LIMIT, effectiveTier, useEntitlements } from "../iap/entitlements";
 import { deckCountTotal } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
-import { releaseLocalSlotsOnLogout } from "../sync/deck";
 import { restore } from "../iap/purchases";
 import { deleteAccount, signOut, useAccount } from "../auth/account";
 import {
@@ -128,17 +127,14 @@ export function Info() {
   const onSignOut = useCallback(() => {
     Alert.alert(
       "ログアウト",
-      "ログアウトすると、この端末に保存されている本はすべて削除されます（Proでクラウドに保存済みの本は再ログインで取得できます）。よろしいですか？",
+      "ログアウトしてもこの端末の本は保持されますが、サインインするまで開けなくなります。",
       [
         { text: "キャンセル", style: "cancel" },
         {
           text: "ログアウト",
-          style: "destructive",
           onPress: async () => {
             try {
-              await releaseLocalSlotsOnLogout(); // free Standard slots while the token is still valid
-              await signOut();
-              await clearAllLocalData();
+              await signOut(); // keep local data; the sign-in gate locks it until re-login
               setView({ name: "decks" });
             } catch (e) {
               Alert.alert("エラー", e instanceof Error ? e.message : String(e));

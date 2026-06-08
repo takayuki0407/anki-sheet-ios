@@ -18,6 +18,8 @@ import Purchases from "react-native-purchases";
 import { getFirebaseAuth, isAuthConfigured } from "./firebase";
 import { syncCustomerInfo } from "../iap/purchases";
 import { deleteAccountData } from "../sync/api";
+import { getMeta, setMeta } from "../db/repo";
+import { clearAllLocalData } from "../db/backup";
 
 export interface AccountUser {
   uid: string;
@@ -53,6 +55,16 @@ export function initAuthListener(): void {
       user: u ? { uid: u.uid, email: u.email } : null,
       ready: true,
     });
+    // Different-account guard: if a DIFFERENT account signs in on this device, wipe the previous
+    // account's local data (it's owned by / locked to that account). Same account or a first
+    // sign-in keeps the data (adopts ownership). Sign-out keeps the data (the gate locks it).
+    if (u) {
+      void (async () => {
+        const prev = await getMeta("ownerUid");
+        if (prev && prev !== u.uid) await clearAllLocalData();
+        await setMeta("ownerUid", u.uid);
+      })();
+    }
     // Tie the RevenueCat user to the Firebase uid so entitlements sync across platforms, and
     // apply the returned CustomerInfo immediately (don't rely on the async listener) so the gate
     // can't briefly lock a subscriber out on logout or miss a web entitlement on login.

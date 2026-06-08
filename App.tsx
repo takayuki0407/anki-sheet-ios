@@ -19,7 +19,7 @@ import { DowngradeSelect } from "./src/screens/DowngradeSelect";
 import { EngineTest } from "./src/screens/EngineTest";
 import { Onboarding } from "./src/screens/Onboarding";
 import { deckCountTotal, getMeta, setMeta } from "./src/db/repo";
-import { initAuthListener } from "./src/auth/account";
+import { initAuthListener, isAuthConfigured, useAccount } from "./src/auth/account";
 import { colors } from "./src/ui/theme";
 
 function Router() {
@@ -51,6 +51,8 @@ function Gate() {
   const tier = useEntitlements((s) => s.tier);
   const billingActive = useEntitlements((s) => s.billingActive);
   const ready = useEntitlements((s) => s.ready);
+  const user = useAccount((s) => s.user);
+  const userReady = useAccount((s) => s.ready);
   const [deckCount, setDeckCount] = useState<number | null>(null);
   const refreshCount = useCallback(() => deckCountTotal().then(setDeckCount), []);
   useEffect(() => {
@@ -59,7 +61,10 @@ function Gate() {
 
   const eff = effectiveTier({ tier, billingActive });
 
-  if (!ready || deckCount === null) return null; // brief splash while RC reports
+  if (!ready || deckCount === null || !userReady) return null; // brief splash
+  // Sign-in is REQUIRED (when auth is configured): the app is for signed-in accounts only, so the
+  // bookshelf can't be used (or freely accessed) without an account. Dev/unconfigured stays open.
+  if (isAuthConfigured && !user) return <Login />;
   if (eff === "none") {
     // Locked: reachable only the paywall, login (to restore a subscription), and Info — Info
     // must stay reachable so a logged-in user can still delete their account (Apple 5.1.1(v)).
