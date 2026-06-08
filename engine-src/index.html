@@ -33,9 +33,9 @@
         overflow: auto;
         overscroll-behavior: contain;
         background: #525659;
-        /* Native momentum scrolling (smooth) for one-finger pan; we still own two-finger pinch
-           (its touchmove preventDefaults). pan-x pan-y permits scrolling but not native pinch-zoom. */
-        touch-action: pan-x pan-y;
+        /* Vertical = native momentum scrolling (smooth, no sideways drift because pan-y forbids
+           horizontal). Horizontal pan (when zoomed) + two-finger pinch are handled in JS. */
+        touch-action: pan-y;
         -webkit-overflow-scrolling: touch;
       }
       /* While drawing a mask region (edit), block native scroll so the drag draws. */
@@ -43,14 +43,16 @@
         touch-action: none;
       }
       #viewer.paged {
-        overflow: hidden;
-        align-items: center;
-        justify-content: center;
+        overflow: auto; /* so a zoomed page can be scrolled (was hidden) */
+        align-items: safe center;
+        justify-content: safe center;
       }
       .vcontent {
         display: flex;
         flex-direction: column;
-        align-items: center;
+        /* safe center: centre pages that fit, but fall back to start when a zoomed page overflows
+           so its left/top edge stays reachable (plain center makes the overflow unreachable). */
+        align-items: safe center;
         transform-origin: 0 0;
         will-change: transform;
       }

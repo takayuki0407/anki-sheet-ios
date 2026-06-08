@@ -78,6 +78,9 @@ export class Viewer {
   private scrollRaf = 0;
   // two-finger pinch zoom (smooth: CSS transform during the gesture, real relayout on end)
   private pinch = { active: false, startDist: 1, startZoom: 1, fcx: 0, fcy: 0, scale: 1 };
+  // One-finger axis lock: vertical = native momentum scroll; horizontal = JS pan (so a careless
+  // vertical swipe never drifts sideways). The axis is chosen from the initial drag direction.
+  private hpan = { startX: 0, startY: 0, lastX: 0, axis: "none" as "none" | "v" | "h" };
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
@@ -479,7 +482,11 @@ export class Viewer {
         this.contentEl.style.transformOrigin = `${this.pinch.fcx}px ${this.pinch.fcy}px`;
       e.preventDefault();
     }
-    // One-finger drag → native momentum scrolling (browser-handled); nothing to do here.
+    // One-finger: record the start for the horizontal-pan axis lock (vertical stays native).
+    const t = e.touches[0];
+    this.hpan.startX = this.hpan.lastX = t.clientX;
+    this.hpan.startY = t.clientY;
+    this.hpan.axis = "none";
   };
 
   private onTouchMove = (e: TouchEvent): void => {
@@ -500,7 +507,20 @@ export class Viewer {
       e.preventDefault();
       return;
     }
-    // One-finger move → let the browser scroll natively (smooth momentum).
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (this.hpan.axis === "none") {
+      const dx = t.clientX - this.hpan.startX;
+      const dy = t.clientY - this.hpan.startY;
+      if (Math.hypot(dx, dy) < 8) return; // wait until the drag direction is clear
+      // |dx| > |dy| → horizontal pan (JS); otherwise vertical → native scroll (no sideways drift).
+      this.hpan.axis = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+    }
+    if (this.hpan.axis === "h") {
+      this.root.scrollLeft -= t.clientX - this.hpan.lastX;
+      e.preventDefault(); // we own horizontal; block the browser's pan-y handling of it
+    }
+    this.hpan.lastX = t.clientX;
   };
 
   private onTouchEnd = (e: TouchEvent): void => {
