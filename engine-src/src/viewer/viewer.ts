@@ -78,11 +78,6 @@ export class Viewer {
   private scrollRaf = 0;
   // two-finger pinch zoom (smooth: CSS transform during the gesture, real relayout on end)
   private pinch = { active: false, startDist: 1, startZoom: 1, fcx: 0, fcy: 0, scale: 1 };
-  // Soft axis lock: scrolling stays fully native, but a near-vertical one-finger swipe (within ~20°
-  // of straight up/down) ignores horizontal — scrollLeft is pinned to its gesture-start value so a
-  // careless vertical flick doesn't drift sideways. Diagonal/horizontal swipes follow the finger.
-  private glock = { x: 0, y: 0, lastX: 0, axis: "none" as "none" | "vlock" | "free" };
-  private static readonly VLOCK_TAN = 1.0; // tan(45°)=1: |dx| < |dy| → vertical-dominant → lock
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
@@ -114,13 +109,37 @@ export class Viewer {
   constructor(root: HTMLElement, emit: Emit) {
     this.root = root;
     this.emit = emit;
-    this.root.addEventListener("scroll", this.onScroll, { passive: true });
+    // The document is scrolled by the native WKWebView scroll view (RN: scrollEnabled +
+    // directionalLockEnabled), so iOS supplies the momentum + axis-direction lock. We listen on
+    // window for those scrolls and only intercept touches for custom pinch-zoom / mask drawing.
+    window.addEventListener("scroll", this.onScroll, { passive: true });
     this.root.addEventListener("touchstart", this.onTouchStart, { passive: false });
-    // Passive (no scroll penalty): classifies one-finger swipes for the soft axis lock above.
-    this.root.addEventListener("touchmove", this.onMove, { passive: true });
     this.root.addEventListener("touchend", this.onTouchEnd, { passive: true });
     this.root.addEventListener("touchcancel", this.onTouchEnd, { passive: true });
     window.addEventListener("resize", this.onResize);
+  }
+
+  // ---- document scroller + visual viewport (the native WKWebView scroll view) ----
+  private get sx(): number {
+    return window.scrollX;
+  }
+  private get sy(): number {
+    return window.scrollY;
+  }
+  private get vw(): number {
+    return window.innerWidth || 1;
+  }
+  private get vh(): number {
+    return window.innerHeight || 1;
+  }
+  private get sw(): number {
+    return document.documentElement.scrollWidth || 1;
+  }
+  private get sh(): number {
+    return document.documentElement.scrollHeight || 1;
+  }
+  private scrollTo(x: number, y: number): void {
+    window.scrollTo(x, y);
   }
 
   async open(a: OpenBookArgs): Promise<void> {
@@ -167,6 +186,8 @@ export class Viewer {
     this.views = [];
     this.root.className = this.mode === "paged" ? "paged" : "";
     this.root.style.display = this.mode === "paged" ? "flex" : "block";
+    const statusEl = document.getElementById("status");
+    if (statusEl) statusEl.style.display = "none"; // viewer owns the document (native scroll)
 
     // All pages live in one wrapper so pinch can scale it (CSS transform) smoothly.
     const content = document.createElement("div");
@@ -201,15 +222,15 @@ export class Viewer {
     // mask near the screen edge reveals/stars it instead of accidentally turning the page.
 
     this.io = new IntersectionObserver(this.onIntersect, {
-      root: this.root,
+      root: null, // the viewport (the document is scrolled by the native scroll view)
       rootMargin: this.mode === "paged" ? "0px" : "150% 0px",
     });
     for (const v of this.views) this.io.observe(v.el);
   }
 
   private cssW(): number {
-    const cw = this.root.clientWidth || 1;
-    const ch = this.root.clientHeight || 1;
+    const cw = this.vw;
+    const ch = this.vh;
     const base = this.fit === "page" ? Math.min(cw, ch * this.aspect) : cw;
     return Math.max(1, base * this.zoom);
   }
@@ -387,9 +408,9 @@ export class Viewer {
   }
 
   private renderVisible(): void {
-    const top = this.root.scrollTop;
-    const bottom = top + this.root.clientHeight;
-    const margin = this.root.clientHeight;
+    const top = this.sy;
+    const bottom = top + this.vh;
+    const margin = this.vh;
     for (let i = 0; i < this.views.length; i++) {
       const v = this.views[i];
       if (this.mode === "paged" && i !== this.current) continue;
@@ -413,7 +434,7 @@ export class Viewer {
     if (this.mode !== "scroll" || this.scrollRaf) return;
     this.scrollRaf = requestAnimationFrame(() => {
       this.scrollRaf = 0;
-      const mid = this.root.scrollTop + this.root.clientHeight / 2;
+      const mid = this.sy + this.vh / 2;
       let best = this.current;
       for (let i = 0; i < this.views.length; i++) {
         const v = this.views[i];
@@ -434,7 +455,7 @@ export class Viewer {
     this.relayout();
     if (this.mode === "scroll") {
       const v = this.views[this.current];
-      if (v) this.root.scrollTop = v.el.offsetTop;
+      if (v) this.scrollTo(this.sx, v.el.offsetTop);
     }
   };
 
@@ -459,28 +480,7 @@ export class Viewer {
     }
   }
 
-  // Soft axis lock. Vertical is native (touch-action: pan-y); horizontal is NEVER native, so we
-  // drive it here ONLY for a horizontal-dominant swipe (>45° from vertical). A vertical-dominant
-  // swipe gets no horizontal at all — nothing to fight or snap back, so vertical stays smooth.
-  // Passive (no preventDefault): scrollLeft is independent of the native vertical scroller.
-  private onMove = (e: TouchEvent): void => {
-    if (this.drawMode || this.pinch.active || e.touches.length !== 1) return;
-    const t = e.touches[0];
-    if (this.glock.axis === "none") {
-      const dx = t.clientX - this.glock.x;
-      const dy = t.clientY - this.glock.y;
-      if (Math.hypot(dx, dy) < 10) return; // wait until the swipe direction is clear
-      // Vertical-dominant (within 45° of vertical) → lock out horizontal; else follow finger (free).
-      this.glock.axis = Math.abs(dx) < Math.abs(dy) * Viewer.VLOCK_TAN ? "vlock" : "free";
-    }
-    if (this.glock.axis === "free") this.root.scrollLeft -= t.clientX - this.glock.lastX;
-    this.glock.lastX = t.clientX;
-  };
-
   private onTouchStart = (e: TouchEvent): void => {
-    // Reset the soft axis lock for this gesture (classified on the first move; see onMove).
-    const ft = e.touches[0];
-    this.glock = { x: ft.clientX, y: ft.clientY, lastX: ft.clientX, axis: "none" };
     // Mask editing: a drag draws a rectangle on the page under the finger (add / 範囲削除).
     if (this.editMode && this.drawMode && e.touches.length === 1) {
       const t = e.touches[0];
@@ -516,11 +516,11 @@ export class Viewer {
       this.pinch.startDist = this.touchDist(e.touches[0], e.touches[1]) || 1;
       this.pinch.startZoom = this.zoom;
       this.pinch.scale = 1;
-      const rect = this.root.getBoundingClientRect();
       const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      this.pinch.fcx = this.root.scrollLeft + (cx - rect.left);
-      this.pinch.fcy = this.root.scrollTop + (cy - rect.top);
+      // Focal point in document coords (the native scroll view's viewport origin is 0,0).
+      this.pinch.fcx = this.sx + cx;
+      this.pinch.fcy = this.sy + cy;
       if (this.contentEl)
         this.contentEl.style.transformOrigin = `${this.pinch.fcx}px ${this.pinch.fcy}px`;
       this.startMove();
@@ -587,14 +587,14 @@ export class Viewer {
     }
     this.pinch.scale = 1;
     if (Math.abs(target - this.zoom) < 0.001) return;
-    const fracX = this.pinch.fcx / (this.root.scrollWidth || 1);
-    const fracY = this.pinch.fcy / (this.root.scrollHeight || 1);
-    const screenX = this.pinch.fcx - this.root.scrollLeft;
-    const screenY = this.pinch.fcy - this.root.scrollTop;
+    const fracX = this.pinch.fcx / this.sw;
+    const fracY = this.pinch.fcy / this.sh;
+    const screenX = this.pinch.fcx - this.sx;
+    const screenY = this.pinch.fcy - this.sy;
     this.zoom = target;
     this.relayout();
-    this.root.scrollLeft = fracX * (this.root.scrollWidth || 1) - screenX;
-    this.root.scrollTop = fracY * (this.root.scrollHeight || 1) - screenY;
+    // keep the focal content point under the same screen point (sw/sh re-read post-relayout)
+    this.scrollTo(fracX * this.sw - screenX, fracY * this.sh - screenY);
     this.emit({ type: "zoom-changed", zoom: this.zoom });
   }
 
@@ -605,7 +605,7 @@ export class Viewer {
     this.current = p;
     if (this.mode === "scroll") {
       const v = this.views[p];
-      if (v) this.root.scrollTop = v.el.offsetTop;
+      if (v) this.scrollTo(this.sx, v.el.offsetTop);
     } else {
       for (let i = 0; i < this.views.length; i++) {
         this.views[i].el.style.display = i === p ? "" : "none";
@@ -638,7 +638,7 @@ export class Viewer {
     this.relayout();
     if (this.mode === "scroll") {
       const v = this.views[this.current];
-      if (v) this.root.scrollTop = v.el.offsetTop;
+      if (v) this.scrollTo(this.sx, v.el.offsetTop);
     }
     this.emit({ type: "zoom-changed", zoom: this.zoom });
   }
@@ -759,8 +759,8 @@ export class Viewer {
    * pure arithmetic from offsets (no getBoundingClientRect), and skips off-screen pages. */
   private manualReveal(): void {
     if (!this.manualSheetEl || this.mode !== "scroll" || this.pinch.active) return;
-    const scrollTop = this.root.scrollTop;
-    const vh = this.root.clientHeight || 1;
+    const scrollTop = this.sy;
+    const vh = this.vh;
     const line = this.band.top; // the band's top edge, in viewport coordinates
     for (const v of this.views) {
       const pageTop = v.el.offsetTop - scrollTop; // viewport Y of this page's top

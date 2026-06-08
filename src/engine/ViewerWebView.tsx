@@ -205,8 +205,14 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         allowingReadAccessToURL={documentDirUri()}
         onMessage={onMessage}
         onError={(e) => onError?.("webview: " + e.nativeEvent.description)}
-        // The viewer manages its own scrolling inside the WebView.
-        scrollEnabled={false}
+        // The page content scrolls via THIS native WKWebView scroll view, so iOS provides
+        // Safari-grade momentum AND directional lock (a near-vertical swipe won't drift sideways).
+        // directionalLockEnabled = UIScrollView.isDirectionalLockEnabled. Custom pinch-zoom is done
+        // in-page (the viewport disables native zoom); insets are off so doc (0,0) = WebView top.
+        scrollEnabled
+        directionalLockEnabled
+        automaticallyAdjustContentInsets={false}
+        contentInsetAdjustmentBehavior="never"
         style={styles.fill}
       />
     </View>
