@@ -81,7 +81,7 @@ export class Viewer {
   // Soft axis lock: scrolling stays fully native, but a near-vertical one-finger swipe (within ~20°
   // of straight up/down) ignores horizontal — scrollLeft is pinned to its gesture-start value so a
   // careless vertical flick doesn't drift sideways. Diagonal/horizontal swipes follow the finger.
-  private glock = { x: 0, y: 0, left: 0, axis: "none" as "none" | "vlock" | "free" };
+  private glock = { x: 0, y: 0, lastX: 0, axis: "none" as "none" | "vlock" | "free" };
   private static readonly VLOCK_TAN = 0.36; // tan(20°) ≈ 0.364: |dx| < |dy|*0.36 → near-vertical
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
@@ -117,7 +117,7 @@ export class Viewer {
     this.root.addEventListener("scroll", this.onScroll, { passive: true });
     this.root.addEventListener("touchstart", this.onTouchStart, { passive: false });
     // Passive (no scroll penalty): classifies one-finger swipes for the soft axis lock above.
-    this.root.addEventListener("touchmove", this.onDetectMove, { passive: true });
+    this.root.addEventListener("touchmove", this.onMove, { passive: true });
     this.root.addEventListener("touchend", this.onTouchEnd, { passive: true });
     this.root.addEventListener("touchcancel", this.onTouchEnd, { passive: true });
     window.addEventListener("resize", this.onResize);
@@ -410,9 +410,6 @@ export class Viewer {
   };
 
   private onScroll = (): void => {
-    // Soft axis lock: for a near-vertical swipe, undo any sideways drift (pin horizontal).
-    if (this.glock.axis === "vlock" && this.root.scrollLeft !== this.glock.left)
-      this.root.scrollLeft = this.glock.left;
     if (this.mode !== "scroll" || this.scrollRaf) return;
     this.scrollRaf = requestAnimationFrame(() => {
       this.scrollRaf = 0;
@@ -462,23 +459,28 @@ export class Viewer {
     }
   }
 
-  // Classify a one-finger swipe for the soft axis lock. Passive: it only reads coordinates (the pin
-  // itself happens in onScroll), so the native scroll keeps its full speed.
-  private onDetectMove = (e: TouchEvent): void => {
+  // Soft axis lock. Vertical is native (touch-action: pan-y); horizontal is NEVER native, so we
+  // drive it here ONLY for a clearly diagonal/horizontal swipe. A near-vertical swipe (≤~20° tilt)
+  // gets no horizontal at all — there is nothing to fight or snap back, so vertical stays smooth.
+  // Passive (no preventDefault): scrollLeft is independent of the native vertical scroller.
+  private onMove = (e: TouchEvent): void => {
     if (this.drawMode || this.pinch.active || e.touches.length !== 1) return;
-    if (this.glock.axis !== "none") return;
     const t = e.touches[0];
-    const dx = t.clientX - this.glock.x;
-    const dy = t.clientY - this.glock.y;
-    if (Math.hypot(dx, dy) < 10) return; // wait until the swipe direction is clear
-    // Within ~20° of vertical → pin horizontal (vlock); otherwise follow the finger (free 2D).
-    this.glock.axis = Math.abs(dx) < Math.abs(dy) * Viewer.VLOCK_TAN ? "vlock" : "free";
+    if (this.glock.axis === "none") {
+      const dx = t.clientX - this.glock.x;
+      const dy = t.clientY - this.glock.y;
+      if (Math.hypot(dx, dy) < 10) return; // wait until the swipe direction is clear
+      // Within ~20° of vertical → lock out horizontal (vlock); otherwise follow the finger (free).
+      this.glock.axis = Math.abs(dx) < Math.abs(dy) * Viewer.VLOCK_TAN ? "vlock" : "free";
+    }
+    if (this.glock.axis === "free") this.root.scrollLeft -= t.clientX - this.glock.lastX;
+    this.glock.lastX = t.clientX;
   };
 
   private onTouchStart = (e: TouchEvent): void => {
-    // Reset the soft axis lock for this gesture (classified on the first move; see onDetectMove).
+    // Reset the soft axis lock for this gesture (classified on the first move; see onMove).
     const ft = e.touches[0];
-    this.glock = { x: ft.clientX, y: ft.clientY, left: this.root.scrollLeft, axis: "none" };
+    this.glock = { x: ft.clientX, y: ft.clientY, lastX: ft.clientX, axis: "none" };
     // Mask editing: a drag draws a rectangle on the page under the finger (add / 範囲削除).
     if (this.editMode && this.drawMode && e.touches.length === 1) {
       const t = e.touches[0];
