@@ -157,6 +157,30 @@ export function DeckList() {
     [load, bumpDecks],
   );
 
+  // Standard: a cloud book is only a registered slot (no file) → can't download, but can be
+  // released to free the account-global count.
+  const onRemoveCloud = useCallback((b: AccountBook) => {
+    Alert.alert(
+      "アカウントから削除",
+      `「${b.name || "（無題）"}」をアカウントの登録から削除します（冊数の枠が空きます）。`,
+      [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "削除",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await unregisterBook(b.book_id);
+              setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
+            } catch (e) {
+              Alert.alert("エラー", syncErrorMessage(e));
+            }
+          },
+        },
+      ],
+    );
+  }, []);
+
   useEffect(() => {
     getMeta("bookshelfView").then((v) => {
       if (isViewMode(v)) setViewMode(v);
@@ -448,7 +472,7 @@ export function DeckList() {
                 <Text style={styles.cloudTitle}>クラウド（他の端末の本）</Text>
                 {!cloudPro && (
                   <Text style={styles.cloudNote}>
-                    クラウドからの取得はProプラン限定です（Standardプランはクラウド保存なし）。
+                    Standardプランはクラウドにファイルを保存しません。これらはアカウントに登録された枠で、取得はできません。不要なら削除して枠を空けられます。
                   </Text>
                 )}
                 {cloud.map((b) => (
@@ -470,7 +494,9 @@ export function DeckList() {
                         </Text>
                       </Pressable>
                     ) : (
-                      <Text style={styles.cloudLocked}>Pro限定</Text>
+                      <Pressable style={styles.cloudBtn} onPress={() => onRemoveCloud(b)}>
+                        <Text style={styles.cloudBtnText}>削除</Text>
+                      </Pressable>
                     )}
                   </View>
                 ))}
