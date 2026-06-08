@@ -76,20 +76,6 @@ export class Viewer {
   private views: PageView[] = [];
   private io: IntersectionObserver | null = null;
   private scrollRaf = 0;
-  // one-finger axis-locked pan + inertial fling (ported from the original viewerGestures)
-  private pan = {
-    active: false,
-    mode: "none" as "none" | "vertical" | "free",
-    panned: false,
-    startX: 0,
-    startY: 0,
-    lastX: 0,
-    lastY: 0,
-    lastT: 0,
-    vx: 0,
-    vy: 0,
-    raf: 0,
-  };
   // two-finger pinch zoom (smooth: CSS transform during the gesture, real relayout on end)
   private pinch = { active: false, startDist: 1, startZoom: 1, fcx: 0, fcy: 0, scale: 1 };
   private contentEl: HTMLElement | null = null;
@@ -449,13 +435,7 @@ export class Viewer {
     return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   }
 
-  private stopFling(): void {
-    if (this.pan.raf) cancelAnimationFrame(this.pan.raf);
-    this.pan.raf = 0;
-  }
-
   private onTouchStart = (e: TouchEvent): void => {
-    this.stopFling();
     // Mask editing: a drag draws a rectangle on the page under the finger (add / 範囲削除).
     if (this.editMode && this.drawMode && e.touches.length === 1) {
       const t = e.touches[0];
@@ -486,7 +466,6 @@ export class Viewer {
       }
     }
     if (e.touches.length >= 2) {
-      this.pan.active = false;
       this.pinch.active = true;
       this.pinch.startDist = this.touchDist(e.touches[0], e.touches[1]) || 1;
       this.pinch.startZoom = this.zoom;
@@ -499,16 +478,8 @@ export class Viewer {
       if (this.contentEl)
         this.contentEl.style.transformOrigin = `${this.pinch.fcx}px ${this.pinch.fcy}px`;
       e.preventDefault();
-      return;
     }
-    const t = e.touches[0];
-    this.pan.active = true;
-    this.pan.mode = "none";
-    this.pan.panned = false;
-    this.pan.startX = this.pan.lastX = t.clientX;
-    this.pan.startY = this.pan.lastY = t.clientY;
-    this.pan.vx = this.pan.vy = 0;
-    this.pan.lastT = performance.now();
+    // One-finger drag → native momentum scrolling (browser-handled); nothing to do here.
   };
 
   private onTouchMove = (e: TouchEvent): void => {
@@ -529,28 +500,7 @@ export class Viewer {
       e.preventDefault();
       return;
     }
-    if (!this.pan.active || e.touches.length !== 1) return;
-    const t = e.touches[0];
-    if (this.pan.mode === "none") {
-      const dx = t.clientX - this.pan.startX;
-      const dy = t.clientY - this.pan.startY;
-      if (Math.hypot(dx, dy) < 6) return; // a tap (under threshold) still clicks a mask
-      // initial drag steeper than 45deg -> vertical-only (no sideways drift); else free 2D
-      this.pan.mode = Math.abs(dx) >= Math.abs(dy) ? "free" : "vertical";
-      this.pan.panned = true;
-    }
-    const now = performance.now();
-    const dt = Math.max(1, now - this.pan.lastT);
-    const mdx = t.clientX - this.pan.lastX;
-    const mdy = t.clientY - this.pan.lastY;
-    this.pan.lastX = t.clientX;
-    this.pan.lastY = t.clientY;
-    this.pan.lastT = now;
-    this.pan.vy = 0.8 * (mdy / dt) + 0.2 * this.pan.vy;
-    this.pan.vx = this.pan.mode === "free" ? 0.8 * (mdx / dt) + 0.2 * this.pan.vx : 0;
-    this.root.scrollTop -= mdy;
-    if (this.pan.mode === "free") this.root.scrollLeft -= mdx;
-    e.preventDefault();
+    // One-finger move → let the browser scroll natively (smooth momentum).
   };
 
   private onTouchEnd = (e: TouchEvent): void => {
@@ -575,51 +525,10 @@ export class Viewer {
       this.root.classList.remove("drawing");
       return;
     }
-    if (this.pinch.active) {
-      if (e.touches.length >= 2) return;
+    if (this.pinch.active && e.touches.length < 2) {
       this.pinch.active = false;
       this.commitPinch();
-      if (e.touches.length === 1) {
-        const t = e.touches[0]; // one finger remains -> begin a fresh pan from it
-        this.pan.active = true;
-        this.pan.mode = "none";
-        this.pan.panned = false;
-        this.pan.startX = this.pan.lastX = t.clientX;
-        this.pan.startY = this.pan.lastY = t.clientY;
-        this.pan.lastT = performance.now();
-      }
-      return;
     }
-    if (!this.pan.active || e.touches.length > 0) return;
-    this.pan.active = false;
-    if (!this.pan.panned) return;
-    // swallow the click some WebKit builds synthesize after a drag (don't toggle a mask)
-    const swallow = (ev: Event) => {
-      ev.stopPropagation();
-      ev.preventDefault();
-    };
-    this.root.addEventListener("click", swallow, { capture: true, once: true });
-    setTimeout(() => this.root.removeEventListener("click", swallow, true), 0);
-    if (performance.now() - this.pan.lastT > 80) this.pan.vx = this.pan.vy = 0;
-    let mvx = clamp(this.pan.vx, -5, 5);
-    let mvy = clamp(this.pan.vy, -5, 5);
-    if (Math.hypot(mvx, mvy) < 0.05) return;
-    let prev = performance.now();
-    const step = (): void => {
-      const now = performance.now();
-      const dt = now - prev;
-      prev = now;
-      const decay = Math.pow(0.997, dt);
-      mvx *= decay;
-      mvy *= decay;
-      const bt = this.root.scrollTop;
-      const bl = this.root.scrollLeft;
-      this.root.scrollTop -= mvy * dt;
-      if (this.pan.mode === "free") this.root.scrollLeft -= mvx * dt;
-      const moved = this.root.scrollTop !== bt || this.root.scrollLeft !== bl;
-      this.pan.raf = moved && Math.hypot(mvx, mvy) > 0.02 ? requestAnimationFrame(step) : 0;
-    };
-    this.pan.raf = requestAnimationFrame(step);
   };
 
   /** Commit a pinch: replace the transient transform with a real relayout at the final
@@ -866,7 +775,6 @@ export class Viewer {
       cancelAnimationFrame(this.scrollRaf);
       this.scrollRaf = 0;
     }
-    this.stopFling();
     if (this.doc) {
       this.doc.loadingTask.destroy().catch(() => undefined);
       this.doc = null;

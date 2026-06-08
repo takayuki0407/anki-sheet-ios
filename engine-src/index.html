@@ -33,7 +33,13 @@
         overflow: auto;
         overscroll-behavior: contain;
         background: #525659;
-        /* We own panning/zoom (custom touch handlers) for axis-lock + pinch. */
+        /* Native momentum scrolling (smooth) for one-finger pan; we still own two-finger pinch
+           (its touchmove preventDefaults). pan-x pan-y permits scrolling but not native pinch-zoom. */
+        touch-action: pan-x pan-y;
+        -webkit-overflow-scrolling: touch;
+      }
+      /* While drawing a mask region (edit), block native scroll so the drag draws. */
+      #viewer.drawing {
         touch-action: none;
       }
       #viewer.paged {
@@ -74,7 +80,8 @@
       }
       .vmask.revealed {
         background: transparent;
-        box-shadow: none;
+        /* faint outline where a revealed answer was, so it's easy to find + re-hide */
+        box-shadow: inset 0 0 0 1px rgba(226, 59, 59, 0.3);
       }
       #viewer.sheet-off .vmask {
         background: transparent;
@@ -92,6 +99,7 @@
       }
       #viewer.manual .vmask.revealed {
         background: transparent; /* keep revealed answers see-through (higher specificity wins) */
+        box-shadow: none; /* no per-mask outline in 赤シート band mode (many reveal at once) */
       }
       /* ---- manual mask editing ---- */
       /* masks become translucent outlines (text visible underneath) and tappable to delete */
