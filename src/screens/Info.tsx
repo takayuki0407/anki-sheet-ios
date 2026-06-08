@@ -134,7 +134,7 @@ export function Info() {
   const onDeleteAccount = useCallback(() => {
     Alert.alert(
       "アカウントを削除",
-      "アカウントと、サブスクリプションとの関連付けを削除します。この操作は取り消せません。",
+      "アカウントと、クラウドに保存されたPDF・進捗をすべて削除します。この操作は取り消せません（この端末内のデータは残ります）。",
       [
         { text: "キャンセル", style: "cancel" },
         {

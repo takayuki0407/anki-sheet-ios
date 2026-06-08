@@ -17,6 +17,7 @@ import * as Crypto from "expo-crypto";
 import Purchases from "react-native-purchases";
 import { getFirebaseAuth, isAuthConfigured } from "./firebase";
 import { syncCustomerInfo } from "../iap/purchases";
+import { deleteAccountData } from "../sync/api";
 
 export interface AccountUser {
   uid: string;
@@ -115,10 +116,13 @@ export async function signOut(): Promise<void> {
   if (auth) await fbSignOut(auth);
 }
 
-/** Delete the account (App Store requires in-app deletion). May need a recent re-login. */
+/** Delete the account (App Store requires in-app deletion). Erases the account's cloud data
+ * (PDF blobs + progress) first — while the token is still valid — then removes the auth user.
+ * The cloud purge throwing aborts deletion so we never orphan data. May need a recent re-login. */
 export async function deleteAccount(): Promise<void> {
   const auth = getFirebaseAuth();
   const u = auth?.currentUser;
   if (!u) return;
+  await deleteAccountData(); // erase R2 + D1 data for this account
   await deleteUser(u);
 }

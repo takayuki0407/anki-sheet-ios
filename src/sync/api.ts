@@ -102,6 +102,13 @@ export async function listBooks(): Promise<AccountBooks> {
   return res.json();
 }
 
+/** Erase ALL of the account's cloud data (R2 PDFs/content + D1 books/progress/tier). Call this
+ * before deleting the auth user so account deletion also removes everything stored in the cloud. */
+export async function deleteAccountData(): Promise<void> {
+  const res = await authedFetch("/account", { method: "DELETE" });
+  if (!res.ok) throw new Error(`deleteAccount failed: ${res.status}`);
+}
+
 /** Upload deck content JSON (name/color/geometry/clozes/bookmarks). 403 (standard) is a no-op. */
 export async function putContent(bookId: string, json: string): Promise<void> {
   const res = await authedFetch(`/books/${encodeURIComponent(bookId)}/content`, {
