@@ -26,6 +26,7 @@ import {
   putContent,
   registerBook,
   unregisterBook,
+  updateBookMeta,
   type AccountBook,
 } from "./api";
 import { deviceLabel } from "./device";
@@ -105,6 +106,25 @@ export async function backfillCloudIfPro(): Promise<void> {
   for (const [bookId, deckId] of ids) {
     if ((size.get(bookId) ?? 0) > 0) continue; // already has a cloud file
     await uploadDeck(bookId, deckId).catch(() => {});
+  }
+}
+
+/** Stamp THIS device's current name on every book it holds locally (in the account registry), so the
+ * cloud list shows where a book is NOW — not just who first imported it. Called after the user
+ * renames this device; only touches rows whose label differs. Best-effort; never throws. */
+export async function applyDeviceNameToLocalBooks(): Promise<void> {
+  if (!(await idToken())) return;
+  const me = deviceLabel();
+  let acct;
+  try {
+    acct = await listBooks();
+  } catch {
+    return;
+  }
+  const ids = await localBookIds(); // Map<bookId, deckId>
+  for (const b of acct.books) {
+    if (ids.has(b.book_id) && b.device !== me)
+      await updateBookMeta(b.book_id, { device: me }).catch(() => {});
   }
 }
 

@@ -28,6 +28,7 @@ import {
   type AccountBook,
 } from "../sync/api";
 import { backfillCloudIfPro, deckBookId, downloadDeck, localBookIds } from "../sync/deck";
+import { deviceLabel } from "../sync/device";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
 
@@ -142,6 +143,9 @@ export function DeckList() {
       setDownloading((s) => new Set(s).add(b.book_id));
       try {
         await downloadDeck(b);
+        // Stamp THIS device as the current holder so the cloud list (on other devices) shows where
+        // the book is now, not just who first imported it.
+        void updateBookMeta(b.book_id, { device: deviceLabel() }).catch(() => {});
         bumpDecks();
         await load();
         setCloud((c) => c.filter((x) => x.book_id !== b.book_id));

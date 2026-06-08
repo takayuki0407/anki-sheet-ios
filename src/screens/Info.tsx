@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import * as StoreReview from "expo-store-review";
@@ -18,6 +19,8 @@ import { deckCountTotal } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
 import { restore } from "../iap/purchases";
 import { deleteAccount, signOut, useAccount } from "../auth/account";
+import { applyDeviceNameToLocalBooks } from "../sync/deck";
+import { getDeviceName, loadDeviceName, setDeviceName } from "../sync/device";
 import {
   APP_STORE_ID,
   APP_VERSION,
@@ -87,10 +90,26 @@ export function Info() {
   const user = useAccount((s) => s.user);
   const [deckCount, setDeckCount] = useState<number | null>(null);
   const [showLicenses, setShowLicenses] = useState(false);
+  const [deviceName, setDeviceNameInput] = useState("");
+  const [devSaving, setDevSaving] = useState(false);
 
   useEffect(() => {
     deckCountTotal().then(setDeckCount);
+    void loadDeviceName().then(() => setDeviceNameInput(getDeviceName()));
   }, []);
+
+  const onSaveDeviceName = useCallback(async () => {
+    setDevSaving(true);
+    try {
+      await setDeviceName(deviceName);
+      await applyDeviceNameToLocalBooks(); // re-stamp this device's cloud books with the new name
+      Alert.alert("保存しました", "この端末の名前を更新しました。");
+    } catch (e) {
+      Alert.alert("エラー", e instanceof Error ? e.message : String(e));
+    } finally {
+      setDevSaving(false);
+    }
+  }, [deviceName]);
 
   const contact = useCallback(() => {
     const subject = encodeURIComponent("Anki-sheet お問い合わせ");
@@ -232,6 +251,29 @@ export function Info() {
           {user ? (
             <>
               <Row label="ログイン中" value={user.email ?? "Apple ID でログイン"} />
+              <View style={styles.deviceField}>
+                <Text style={styles.deviceLabel}>この端末の名前</Text>
+                <View style={styles.deviceRow}>
+                  <TextInput
+                    style={styles.deviceInput}
+                    value={deviceName}
+                    onChangeText={setDeviceNameInput}
+                    placeholder="例：Takayuki の iPhone"
+                    placeholderTextColor={colors.muted}
+                    autoCapitalize="none"
+                  />
+                  <Pressable
+                    style={styles.deviceSave}
+                    disabled={devSaving}
+                    onPress={() => void onSaveDeviceName()}
+                  >
+                    <Text style={styles.deviceSaveText}>{devSaving ? "保存中…" : "保存"}</Text>
+                  </Pressable>
+                </View>
+                <Text style={styles.deviceHint}>
+                  クラウドの本一覧に表示される名前です。iOSは端末名を自動取得できないため自由に設定できます。
+                </Text>
+              </View>
               <Row label="ログアウト" onPress={onSignOut} />
               <Row label="アカウントを削除" onPress={onDeleteAccount} />
             </>
@@ -302,4 +344,26 @@ const styles = StyleSheet.create({
   helpQ: { fontSize: 15, color: colors.text, fontWeight: "600", flex: 1 },
   helpA: { fontSize: 13, color: colors.textSub, lineHeight: 20, marginTop: 8 },
   licenses: { fontSize: 12, color: colors.textSub, lineHeight: 20, padding: 14 },
+  deviceField: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  deviceLabel: { fontSize: 15, color: colors.text, marginBottom: 8 },
+  deviceRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  deviceInput: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.text,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  deviceSave: { backgroundColor: colors.sand, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 9 },
+  deviceSaveText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  deviceHint: { fontSize: 12, color: colors.muted, lineHeight: 17, marginTop: 8 },
 });

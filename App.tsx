@@ -19,6 +19,7 @@ import { DowngradeSelect } from "./src/screens/DowngradeSelect";
 import { EngineTest } from "./src/screens/EngineTest";
 import { Onboarding } from "./src/screens/Onboarding";
 import { deckCountTotal, getMeta, setMeta } from "./src/db/repo";
+import { loadDeviceName } from "./src/sync/device";
 import { initAuthListener, isAuthConfigured, useAccount } from "./src/auth/account";
 import { colors } from "./src/ui/theme";
 
@@ -86,6 +87,7 @@ export default function App() {
   useEffect(() => {
     void initPurchases();
     initAuthListener();
+    void loadDeviceName(); // populate the device-name cache before any cloud registration/sync
     getMeta("onboarded").then((v) => setOnboarded(v === "1"));
   }, []);
   return (
