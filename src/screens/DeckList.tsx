@@ -158,6 +158,31 @@ export function DeckList() {
     [load, bumpDecks],
   );
 
+  // Permanently remove a book from the CLOUD (R2 file + registry row + progress) for the whole
+  // account — the deliberate counterpart to the bookshelf's local-only delete. Offered in the cloud
+  // section (books not on this device).
+  const onRemoveCloud = useCallback((b: AccountBook) => {
+    Alert.alert(
+      "クラウドから削除しますか?",
+      `「${b.name || "（無題）"}」をクラウドから完全に削除します。すべての端末から取り込めなくなります。元に戻せません。`,
+      [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "削除",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await unregisterBook(b.book_id);
+              setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
+            } catch (e) {
+              Alert.alert("クラウドから削除できませんでした", syncErrorMessage(e));
+            }
+          },
+        },
+      ],
+    );
+  }, []);
+
   useEffect(() => {
     getMeta("bookshelfView").then((v) => {
       if (isViewMode(v)) setViewMode(v);
@@ -307,21 +332,26 @@ export function DeckList() {
 
   const confirmDelete = useCallback(
     (deck: DeckRow) => {
-      Alert.alert("削除しますか?", `「${deck.name}」と検出結果を削除します。`, [
-        { text: "キャンセル", style: "cancel" },
-        {
-          text: "削除",
-          style: "destructive",
-          onPress: async () => {
-            const bid = await deckBookId(deck.id);
-            await deleteDeck(deck.id);
-            if (bid) void unregisterBook(bid).catch(() => {}); // free the account-global slot
-            bumpDecks();
-            load();
-            void loadCloud();
+      Alert.alert(
+        "この端末から削除しますか?",
+        `「${deck.name}」をこの端末から削除します。クラウドに保存されている本は、あとで「クラウド」から取り込み直せます。`,
+        [
+          { text: "キャンセル", style: "cancel" },
+          {
+            text: "削除",
+            style: "destructive",
+            onPress: async () => {
+              // Local-only delete: do NOT remove the cloud copy. The account's cloud master persists
+              // so OTHER devices keep it and this device can re-download it. Permanent cloud deletion
+              // is the「クラウドから削除」action in the cloud section.
+              await deleteDeck(deck.id);
+              bumpDecks();
+              load();
+              void loadCloud();
+            },
           },
-        },
-      ]);
+        ],
+      );
     },
     [load, loadCloud],
   );
@@ -446,9 +476,9 @@ export function DeckList() {
           ListFooterComponent={
             cloudPro && cloud.length > 0 ? (
               <View style={styles.cloudSection}>
-                <Text style={styles.cloudTitle}>クラウド（他の端末の本）</Text>
+                <Text style={styles.cloudTitle}>クラウド（この端末にない本）</Text>
                 <Text style={styles.cloudNote}>
-                  同じアカウントの本です。タップでこの端末に取り込めます。
+                  同じアカウントの本です。「取り込む」で追加、「削除」ですべての端末から完全に削除します。
                 </Text>
                 {cloud
                   .filter((b) => b.size > 0)
@@ -468,6 +498,13 @@ export function DeckList() {
                         <Text style={styles.cloudBtnText}>
                           {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
                         </Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.cloudDeleteBtn}
+                        disabled={downloading.has(b.book_id)}
+                        onPress={() => onRemoveCloud(b)}
+                      >
+                        <Text style={styles.cloudDeleteText}>削除</Text>
                       </Pressable>
                     </View>
                   ))}
@@ -590,4 +627,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   cloudBtnText: { color: colors.ocean, fontSize: 13, fontWeight: "600" },
+  cloudDeleteBtn: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
+  cloudDeleteText: { color: "#c0392b", fontSize: 13, fontWeight: "600" },
 });
