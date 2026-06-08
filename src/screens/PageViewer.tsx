@@ -32,6 +32,7 @@ import {
   getMeta,
   listBookmarks,
   renameBookmark,
+  replaceBookmarks,
   setMeta,
   updateDeck,
 } from "../db/repo";
@@ -200,6 +201,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
                 void setMeta(`star:${deckId}`, JSON.stringify(savedStarred));
               }
             }
+            if (c.bookmarks) void replaceBookmarks(deckId, c.bookmarks).catch(() => {});
             progressAtRef.current = cloud.updatedAt;
             void updateDeck(deckId, { lastPage: startPage, lastMode: startMode });
             void setMeta(
@@ -260,6 +262,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
       if (!(await idToken())) return;
       const { idToKey } = cardKeyMaps(cardsRef.current);
       const toKeys = (ids: number[]) => ids.map((i) => idToKey.get(i)).filter((x): x is string => !!x);
+      const bms = await listBookmarks(deckId);
       const at = Date.now();
       progressAtRef.current = at;
       void setMeta(`progressAt:${deckId}`, String(at));
@@ -270,6 +273,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
         sheetBand: revealStateRef.current.band,
         revealedKeys: toKeys(revealStateRef.current.revealed),
         starredKeys: toKeys(starredRef.current),
+        bookmarks: bms.map((b) => ({ title: b.title, pageIndex: b.pageIndex })),
       }).catch(() => {});
     }, 1600);
   }, [deckId]);
@@ -346,6 +350,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
         const { idToKey } = cardKeyMaps(cardsRef.current);
         const toKeys = (ids: number[]) =>
           ids.map((i) => idToKey.get(i)).filter((x): x is string => !!x);
+        const bms = await listBookmarks(deckId);
         void setMeta(`progressAt:${deckId}`, String(Date.now()));
         void putProgress(bookIdRef.current!, {
           lastPage: page,
@@ -354,6 +359,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
           sheetBand: revealStateRef.current.band,
           revealedKeys: toKeys(revealStateRef.current.revealed),
           starredKeys: toKeys(starredRef.current),
+          bookmarks: bms.map((b) => ({ title: b.title, pageIndex: b.pageIndex })),
         }).catch(() => {});
       })();
     }
@@ -505,11 +511,12 @@ export function PageViewer({ deckId }: { deckId: number }) {
         const title = (text ?? "").trim() || `${page + 1}ページ`;
         await addBookmark(deckId, page, title);
         setBookmarks(await listBookmarks(deckId));
+        pushProgress(); // sync しおり cross-device
       },
       "plain-text",
       `${page + 1}ページ`,
     );
-  }, [deckId, page]);
+  }, [deckId, page, pushProgress]);
 
   const renameBm = useCallback(
     (b: BookmarkRow) => {
@@ -521,20 +528,22 @@ export function PageViewer({ deckId }: { deckId: number }) {
           if (!title) return;
           await renameBookmark(b.id, title);
           setBookmarks(await listBookmarks(deckId));
+          pushProgress();
         },
         "plain-text",
         b.title,
       );
     },
-    [deckId],
+    [deckId, pushProgress],
   );
 
   const removeBm = useCallback(
     async (id: number) => {
       await deleteBookmark(id);
       setBookmarks(await listBookmarks(deckId));
+      pushProgress();
     },
-    [deckId],
+    [deckId, pushProgress],
   );
 
   const percent = pageCount > 0 ? Math.round(((page + 1) / pageCount) * 100) : 0;

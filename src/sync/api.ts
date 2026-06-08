@@ -134,6 +134,8 @@ export interface ProgressData {
   revealedKeys?: string[];
   /** Starred answers as portable keys (★ review) — synced cross-device like revealedKeys. */
   starredKeys?: string[];
+  /** User bookmarks (しおり) — device-independent, synced cross-device (last-write-wins). */
+  bookmarks?: { title: string; pageIndex: number }[];
 }
 
 export async function getProgress(

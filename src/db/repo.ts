@@ -359,6 +359,26 @@ export async function deleteBookmark(id: number): Promise<void> {
   await db.runAsync("DELETE FROM bookmarks WHERE id = ?", [id]);
 }
 
+/** Replace ALL of a deck's bookmarks (used when pulling synced bookmarks from the cloud). */
+export async function replaceBookmarks(
+  deckId: number,
+  items: { title: string; pageIndex: number }[],
+): Promise<void> {
+  await withWriteLock(async () => {
+    const db = await getDb();
+    const now = Date.now();
+    await db.withTransactionAsync(async () => {
+      await db.runAsync("DELETE FROM bookmarks WHERE deckId = ?", [deckId]);
+      for (const b of items) {
+        await db.runAsync(
+          "INSERT INTO bookmarks (deckId, pageIndex, title, createdAt) VALUES (?, ?, ?, ?)",
+          [deckId, b.pageIndex, b.title, now],
+        );
+      }
+    });
+  });
+}
+
 // ---- app preferences (meta) ----
 
 export async function getMeta(key: string): Promise<string | undefined> {
