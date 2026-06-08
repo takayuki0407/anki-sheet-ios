@@ -21,7 +21,7 @@ interface EngineApi {
   buildId: string | null;
   error: string | null;
   detectAll(
-    args: { url?: string; base64?: string; color?: DeckColorConfig },
+    args: { url?: string; base64?: string; color?: DeckColorConfig; auto?: boolean },
     onProgress?: (p: DetectProgress) => void,
     signal?: AbortSignal,
   ): Promise<PdfDetectionResult>;

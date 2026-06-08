@@ -33,6 +33,12 @@ function colorForPreset(key: string): DeckColorConfig {
   return p ? { ...DEFAULT_MAGENTA_BAND, hueTarget: p.hueTarget, hueTol: p.hueTol } : DEFAULT_MAGENTA_BAND;
 }
 
+/** Map an (auto-picked) color config back to a preset key so the review chips highlight it. */
+function presetKeyForColor(c: DeckColorConfig): string {
+  const p = COLOR_PRESETS.find((x) => x.hueTarget === c.hueTarget && x.hueTol === c.hueTol);
+  return p?.key ?? "magenta";
+}
+
 export function ImportWizard() {
   const setView = useApp((s) => s.setView);
   const engine = useDetectionEngine();
@@ -48,27 +54,30 @@ export function ImportWizard() {
   const abortRef = useRef<AbortController | null>(null);
   const runToken = useRef(0);
 
+  // `auto` (first import): the engine picks the answer color before detecting and returns it.
+  // Re-detect from the review screen passes auto=false with the preset the user chose.
   const runDetect = useCallback(
-    async (uri: string, key: string) => {
+    async (uri: string, key: string, auto = false) => {
       abortRef.current?.abort(); // cancel any in-flight run (e.g. rapid preset switch)
       const ac = new AbortController();
       abortRef.current = ac;
       const myRun = ++runToken.current;
       setPhase("detecting");
-      setProgress("PDFを解析中…");
+      setProgress(auto ? "答えの色を判定中…" : "PDFを解析中…");
       setResult(null);
       try {
-        const color = colorForPreset(key);
         // Detect first, then render the cover — they share one engine, so running them
         // sequentially avoids contention (and a cancelled run won't keep rendering a cover).
         const detection = await engine.detectAll(
-          { url: uri, color },
+          auto ? { url: uri, auto: true } : { url: uri, color: colorForPreset(key) },
           (p) => {
             if (myRun === runToken.current) setProgress(`検出 ${p.page}/${p.total} … ${p.found}件`);
           },
           ac.signal,
         );
         if (myRun !== runToken.current) return; // superseded by a newer run
+        // Reflect the auto-picked color in the preset chips (and use it when saving the deck).
+        if (auto && detection.color) setPresetKey(presetKeyForColor(detection.color));
         const coverUrl = await engine.cover({ url: uri }).catch(() => undefined);
         if (myRun !== runToken.current) return;
         setResult(detection);
@@ -106,7 +115,7 @@ export function ImportWizard() {
     const uri = await stagePdf(asset.uri);
     setStagedUri(uri);
     setName(asset.name.replace(/\.pdf$/i, ""));
-    runDetect(uri, presetKey);
+    runDetect(uri, presetKey, true); // first import → auto-pick the color
   }, [presetKey, runDetect]);
 
   const changePreset = useCallback(
@@ -171,10 +180,8 @@ export function ImportWizard() {
       {phase === "idle" && (
         <ScrollView contentContainerStyle={styles.pad}>
           <Text style={styles.help}>
-            赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選ぶと、色付きの答えを自動検出します。
+            赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選ぶと、答えの色を自動で判定して検出します。検出後に色を変えて再検出もできます。
           </Text>
-          <Text style={styles.label}>答えの色</Text>
-          {Presets}
           <Pressable style={styles.primary} onPress={pick} disabled={!engine.ready}>
             <Text style={styles.primaryText}>
               {engine.ready ? "PDFを選ぶ" : "エンジン準備中…"}

@@ -2,8 +2,8 @@ import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 // Vite resolves this to the worker's asset URL (a sibling file:// at runtime).
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import type { DeckColorConfig, DetectedCloze } from "../types";
-import { DETECT_SCALE } from "../types";
+import type { ColorPreset, DeckColorConfig, DetectedCloze } from "../types";
+import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, DETECT_SCALE } from "../types";
 import { detectPage, type RunCandidate } from "../detect/detectPage";
 import { runBox } from "../detect/runGeometry";
 import { filterByHeight } from "../detect/heightFilter";
@@ -180,6 +180,63 @@ export async function detectOnPage(
   const px = pixelsFrom(c);
   const runs = await runCandidates(page, scale);
   return detectPage(page.pageNumber - 1, px, runs, cfg, scale);
+}
+
+function configForPreset(p: ColorPreset): DeckColorConfig {
+  return { ...DEFAULT_MAGENTA_BAND, hueTarget: p.hueTarget, hueTol: p.hueTol };
+}
+
+/** Evenly-spaced sample page indices (0-based), capped at `max`. */
+function samplePageIndices(total: number, max = 6): number[] {
+  if (total <= max) return Array.from({ length: total }, (_, i) => i);
+  const set = new Set<number>();
+  for (let i = 0; i < max; i++) set.add(Math.floor(((i + 0.5) / max) * total));
+  return [...set];
+}
+
+/**
+ * Auto-pick the answer color for a first import: render a handful of sample pages (once each) and
+ * classify them with EVERY preset, then return the config that finds the most colored answers.
+ * Reuses the real detection so "what counts as an answer" matches the full pass. Falls back to the
+ * magenta default when nothing colored is found. Cheap — one render per sample page.
+ */
+export async function autoDetectColorConfig(
+  data: ArrayBuffer | Blob,
+  signal?: AbortSignal,
+): Promise<DeckColorConfig> {
+  const doc = await loadPdf(data);
+  try {
+    const pages = samplePageIndices(doc.numPages);
+    const scale = detectScale();
+    const canvas = makeCanvas(1, 1);
+    const scores = COLOR_PRESETS.map(() => 0);
+    try {
+      for (const pi of pages) {
+        if (signal?.aborted) throw new CancelledError();
+        const page = await doc.getPage(pi + 1);
+        try {
+          const c = await renderPage(page, scale, canvas);
+          const px = pixelsFrom(c);
+          const runs = await runCandidates(page, scale);
+          for (let i = 0; i < COLOR_PRESETS.length; i++) {
+            scores[i] += detectPage(pi, px, runs, configForPreset(COLOR_PRESETS[i]), scale).length;
+          }
+        } finally {
+          page.cleanup();
+        }
+        await yieldToUI();
+      }
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    let best = 0;
+    for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
+    if (scores[best] < 2) return DEFAULT_MAGENTA_BAND;
+    return configForPreset(COLOR_PRESETS[best]);
+  } finally {
+    await doc.loadingTask.destroy();
+  }
 }
 
 /** Detect on one page of an open document (for tuner preview). */

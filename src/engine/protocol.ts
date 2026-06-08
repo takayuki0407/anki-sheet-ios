@@ -1,5 +1,5 @@
 // Shared shapes for the React Native <-> WebView engine bridge.
-import type { DetectedCloze } from "../types";
+import type { DeckColorConfig, DetectedCloze } from "../types";
 
 /** A bookmark derived from the PDF's built-in outline (目次). */
 export interface OutlineBookmark {
@@ -15,6 +15,8 @@ export interface PdfDetectionResult {
   clozes: DetectedCloze[];
   /** The PDF's built-in outline (目次) as bookmarks, if any. */
   outline: OutlineBookmark[];
+  /** The answer color used — set by the engine when it auto-picked it (first import). */
+  color?: DeckColorConfig;
 }
 
 /** Per-page progress streamed during detection. */

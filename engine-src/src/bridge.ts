@@ -10,7 +10,14 @@
 // rendering (detectAll/cover), and a visible instance drives the viewer (openBook + the
 // setMode/goToPage/setFit/setZoom/setSheet controls), emitting book-ready / page-changed.
 import "./polyfills";
-import { CancelledError, detectClozesInPdf, detectOnPage, loadPdf, renderCover } from "./pdf/pdfEngine";
+import {
+  autoDetectColorConfig,
+  CancelledError,
+  detectClozesInPdf,
+  detectOnPage,
+  loadPdf,
+  renderCover,
+} from "./pdf/pdfEngine";
 import { DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "./types";
 import { blobToDataURL, pdfBytes } from "./io";
 import { Viewer, type FitMode, type OpenBookArgs, type ViewMode } from "./viewer/viewer";
@@ -44,6 +51,7 @@ interface Cmd {
   url?: string;
   base64?: string;
   color?: DeckColorConfig;
+  auto?: boolean; // first import: auto-pick the answer color before detecting
   maxWidth?: number;
   // viewer / openBook
   mode?: ViewMode;
@@ -61,8 +69,15 @@ async function detectAll(m: Cmd): Promise<void> {
   aborters.set(m.reqId, ac);
   try {
     setStatus("PDFを読み込み中…");
-    const data = await pdfBytes(m);
-    const color = m.color ?? DEFAULT_MAGENTA_BAND;
+    const bytes = await pdfBytes(m);
+    // Wrap in a Blob: with auto-color we loadPdf twice (probe + full), and pdf.js may transfer the
+    // backing ArrayBuffer to its worker (neutering it). A Blob hands a fresh copy to each loadPdf.
+    const data = new Blob([bytes], { type: "application/pdf" });
+    let color = m.color ?? DEFAULT_MAGENTA_BAND;
+    if (m.auto) {
+      setStatus("答えの色を判定中…");
+      color = await autoDetectColorConfig(data, ac.signal);
+    }
     const result = await detectClozesInPdf(
       data,
       color,
@@ -72,7 +87,8 @@ async function detectAll(m: Cmd): Promise<void> {
       },
       ac.signal,
     );
-    post({ type: "detected", reqId: m.reqId, result });
+    // Include the (possibly auto-picked) color so the host can show/persist it.
+    post({ type: "detected", reqId: m.reqId, result: { ...result, color } });
     setStatus(`完了: ${result.clozes.length} 件`);
   } catch (e) {
     if (e instanceof CancelledError) {

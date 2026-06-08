@@ -11,7 +11,7 @@ import { documentDirUri } from "./setupEngine";
 
 export interface EngineHandle {
   detectAll(
-    args: { url?: string; base64?: string; color?: DeckColorConfig },
+    args: { url?: string; base64?: string; color?: DeckColorConfig; auto?: boolean },
     onProgress?: (p: DetectProgress) => void,
     signal?: AbortSignal,
   ): Promise<PdfDetectionResult>;
