@@ -69,21 +69,23 @@ export async function localBookIds(): Promise<Map<string, number>> {
   return m;
 }
 
-/** On logout, release THIS device's book slots — but ONLY for a non-Pro (Standard) account, whose
- * books are slot-only (no cloud file). Pro/admin keep their slots + R2 files so the books re-download
- * after re-login / on other devices. Best-effort; never throws. */
+/** On logout, release THIS device's book slots that have NO cloud file (size 0 = a Standard
+ * slot-only registration) — so a local wipe doesn't leave orphaned slots counting toward the cap.
+ * Books WITH a cloud file (uploaded while Pro — incl. a since-downgraded account) are KEPT, since
+ * GET is owner-open so they stay downloadable after re-login / on other devices. Best-effort. */
 export async function releaseLocalSlotsOnLogout(): Promise<void> {
   if (!(await idToken())) return;
-  let unlimited = true; // assume Pro/admin (keep) unless we confirm Standard
+  let books: AccountBook[];
   try {
-    const acct = await listBooks();
-    unlimited = acct.tier === "pro" || acct.tier === "admin";
+    books = (await listBooks()).books;
   } catch {
-    return; // can't tell the tier → don't risk deleting a Pro account's cloud files
+    return; // can't tell which have files → keep everything (never delete a downloadable file)
   }
-  if (unlimited) return;
+  const hasFile = new Map(books.map((b) => [b.book_id, b.size > 0]));
   const ids = await localBookIds();
-  for (const bookId of ids.keys()) await unregisterBook(bookId).catch(() => {});
+  for (const bookId of ids.keys()) {
+    if (hasFile.get(bookId) === false) await unregisterBook(bookId).catch(() => {});
+  }
 }
 
 /** Build the content JSON (everything needed to rebuild the deck except the PDF) from local state. */
