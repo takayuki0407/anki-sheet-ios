@@ -1,4 +1,4 @@
-// ヘルプ・情報 — usage help, color-tuning tips, plan/subscription management, support
+// 情報・ヘルプ — usage help, color-tuning tips, plan/subscription management, support
 // (contact + rate), and legal/about (privacy, terms, version, OSS licenses).
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
@@ -168,7 +168,7 @@ export function Info() {
         <Pressable onPress={() => setView({ name: "decks" })} hitSlop={10}>
           <Text style={styles.back}>← 本棚</Text>
         </Pressable>
-        <Text style={styles.title}>ヘルプ・情報</Text>
+        <Text style={styles.title}>情報・ヘルプ</Text>
         <View style={{ width: 48 }} />
       </View>
 

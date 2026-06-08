@@ -467,7 +467,7 @@ export function DeckList() {
           <Text style={styles.footerLinkText}>バックアップ</Text>
         </Pressable>
         <Pressable onPress={() => setView({ name: "info" })} hitSlop={8}>
-          <Text style={styles.footerLinkText}>ヘルプ・情報</Text>
+          <Text style={styles.footerLinkText}>情報・ヘルプ</Text>
         </Pressable>
       </View>
     </View>
