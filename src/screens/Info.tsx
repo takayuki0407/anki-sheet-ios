@@ -143,7 +143,8 @@ export function Info() {
           onPress: async () => {
             try {
               await deleteAccount();
-              Alert.alert("削除しました");
+              setView({ name: "decks" }); // back to the bookshelf (now signed out)
+              Alert.alert("削除しました", "アカウントとクラウドのデータを削除しました。");
             } catch (e) {
               const code = (e as { code?: string }).code;
               Alert.alert(
@@ -159,7 +160,7 @@ export function Info() {
         },
       ],
     );
-  }, []);
+  }, [setView]);
 
   return (
     <View style={styles.c}>
