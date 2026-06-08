@@ -16,6 +16,7 @@ import { useApp } from "../store/session";
 import { STANDARD_DECK_LIMIT, effectiveTier, useEntitlements } from "../iap/entitlements";
 import { deckCountTotal } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
+import { releaseLocalSlotsOnLogout } from "../sync/deck";
 import { restore } from "../iap/purchases";
 import { deleteAccount, signOut, useAccount } from "../auth/account";
 import {
@@ -135,6 +136,7 @@ export function Info() {
           style: "destructive",
           onPress: async () => {
             try {
+              await releaseLocalSlotsOnLogout(); // free Standard slots while the token is still valid
               await signOut();
               await clearAllLocalData();
               setView({ name: "decks" });

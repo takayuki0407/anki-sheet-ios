@@ -18,7 +18,16 @@ import {
   setMeta,
   updateDeck,
 } from "../db/repo";
-import { SYNC_BASE, getContent, idToken, putContent, registerBook, type AccountBook } from "./api";
+import {
+  SYNC_BASE,
+  getContent,
+  idToken,
+  listBooks,
+  putContent,
+  registerBook,
+  unregisterBook,
+  type AccountBook,
+} from "./api";
 import { deviceLabel } from "./device";
 import type { DeckColorConfig, DetectedCloze } from "../types";
 
@@ -58,6 +67,23 @@ export async function localBookIds(): Promise<Map<string, number>> {
     if (bid) m.set(bid, d.id);
   }
   return m;
+}
+
+/** On logout, release THIS device's book slots — but ONLY for a non-Pro (Standard) account, whose
+ * books are slot-only (no cloud file). Pro/admin keep their slots + R2 files so the books re-download
+ * after re-login / on other devices. Best-effort; never throws. */
+export async function releaseLocalSlotsOnLogout(): Promise<void> {
+  if (!(await idToken())) return;
+  let unlimited = true; // assume Pro/admin (keep) unless we confirm Standard
+  try {
+    const acct = await listBooks();
+    unlimited = acct.tier === "pro" || acct.tier === "admin";
+  } catch {
+    return; // can't tell the tier → don't risk deleting a Pro account's cloud files
+  }
+  if (unlimited) return;
+  const ids = await localBookIds();
+  for (const bookId of ids.keys()) await unregisterBook(bookId).catch(() => {});
 }
 
 /** Build the content JSON (everything needed to rebuild the deck except the PDF) from local state. */
