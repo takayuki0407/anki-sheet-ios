@@ -96,8 +96,9 @@ npx eas-cli build --profile production --platform ios
 # App Store Connect へアップロード
 npx eas-cli submit --profile production --platform ios
 ```
-- App Store Connect でスクリーンショット・説明・プライバシー（「ユーザーが自分のPDFを
-  端末内で処理、外部送信なし」）・サブスクの審査情報を入力 → 審査提出。
+- App Store Connect でスクリーンショット・説明・プライバシー（「PDFの解析は端末内で処理。
+  Proのクラウド同期を使う場合のみ、利用者ご自身の端末間同期のためにPDF・検出結果・進捗を
+  アカウントに保存（Cloudflare R2/D1）」）・サブスクの審査情報を入力 → 審査提出。
 - TestFlight で内部/外部テスター配布も可。
 
 ## 残りの手動作業（コードは実装済み）
