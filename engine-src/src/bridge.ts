@@ -63,6 +63,9 @@ interface Cmd {
   editOn?: boolean;
   editCards?: ViewerCard[];
   drawMode?: "add" | "delete" | null;
+  // study tracking
+  starred?: number[];
+  starReview?: boolean;
 }
 
 const aborters = new Map<string, AbortController>();
@@ -191,6 +194,8 @@ const handlers: Record<string, (m: Cmd) => void> = {
   setEditMode: (m) => getViewer().setEditMode(!!m.editOn),
   setEditCards: (m) => getViewer().setEditCards(m.editCards ?? []),
   setDrawMode: (m) => getViewer().setDrawMode(m.drawMode ?? null),
+  setStarred: (m) => getViewer().setStarred(m.starred ?? []),
+  setStarReview: (m) => getViewer().setStarReview(!!m.starReview),
 };
 
 interface Engine {

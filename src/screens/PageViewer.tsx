@@ -101,6 +101,9 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [editHistory, setEditHistory] = useState<{ adds: EditAdd[]; dels: Set<number> }[]>([]);
   const tempIdRef = useRef(-1);
   const pdfIdRef = useRef(0);
+  // Study tracking: starred answers (long-press a mask) + a review-only mode.
+  const [starred, setStarred] = useState<Set<number>>(new Set());
+  const [starMode, setStarMode] = useState(false);
   const [bmOpen, setBmOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -122,12 +125,13 @@ export function PageViewer({ deckId }: { deckId: number }) {
     let alive = true;
     (async () => {
       try {
-        const [uri, deck, pdf, cards, revealRaw] = await Promise.all([
+        const [uri, deck, pdf, cards, revealRaw, starRaw] = await Promise.all([
           ensureEngine(),
           getDeck(deckId),
           getDeckPdf(deckId),
           deckCards(deckId),
           getMeta(`reveal:${deckId}`),
+          getMeta(`star:${deckId}`),
         ]);
         if (!alive) return;
         if (!deck || !pdf) {
@@ -152,6 +156,14 @@ export function PageViewer({ deckId }: { deckId: number }) {
             savedRevealed = o.revealed ?? [];
             savedMode = o.redMode ?? (o.sheetOn === false ? "off" : "mask");
             if (o.band) savedBand = o.band;
+          } catch {
+            /* ignore corrupt state */
+          }
+        }
+        let savedStarred: number[] = [];
+        if (starRaw) {
+          try {
+            savedStarred = JSON.parse(starRaw) as number[];
           } catch {
             /* ignore corrupt state */
           }
@@ -195,6 +207,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
         setPage(startPage);
         setMode(startMode);
         setRedMode(savedMode);
+        setStarred(new Set(savedStarred));
         setPageCount(pdf.pageCount);
         setEngineUri(uri);
         setOpenArgs({
@@ -209,6 +222,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
           zoom: 1,
           sheetOn: savedMode === "mask",
           revealed: savedRevealed,
+          starred: savedStarred,
           manualOn: savedMode === "sheet" && startMode === "scroll",
           band: savedBand,
         });
@@ -443,6 +457,21 @@ export function PageViewer({ deckId }: { deckId: number }) {
     back();
   }, [editMode, editDirty, discardEdits, back]);
 
+  // ---- study tracking ----
+  // The viewer toggled the star locally (immediate badge) and reported the full set; mirror + persist.
+  const onMaskStarred = useCallback(
+    (_id: number, all: number[]) => {
+      setStarred(new Set(all));
+      void setMeta(`star:${deckId}`, JSON.stringify(all));
+    },
+    [deckId],
+  );
+  const toggleStarReview = useCallback(() => {
+    const next = !starMode;
+    setStarMode(next);
+    ref.current?.setStarReview(next);
+  }, [starMode]);
+
   const openBookmarks = useCallback(async () => {
     setBookmarks(await listBookmarks(deckId));
     setBmOpen(true);
@@ -538,6 +567,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
             }}
             onMaskTapped={onMaskTapped}
             onDrawRect={onDrawRect}
+            onMaskStarred={onMaskStarred}
             onError={(m) => setErr(m)}
           />
         ) : (
@@ -615,6 +645,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
               <Tool label="赤シート" on={redMode === "sheet"} onPress={selectSheet} />
             )}
             <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
+            <Tool label="★復習" on={starMode} onPress={toggleStarReview} />
             <Tool label="目次" onPress={openBookmarks} />
             <Tool label="編集" onPress={enterEdit} />
           </View>

@@ -28,6 +28,8 @@ export interface ViewerOpenArgs {
   sheetOn: boolean;
   /** Revealed card ids to restore from the last session. */
   revealed?: number[];
+  /** Starred answer ids to restore (review-only mode masks just these). */
+  starred?: number[];
   /** Manual red sheet: whether it was on, and its band position/height, last session. */
   manualOn?: boolean;
   band?: { top: number; height: number };
@@ -43,6 +45,8 @@ export interface ViewerHandle {
   setEditMode(on: boolean): void;
   setEditCards(cards: ViewerEditCard[]): void;
   setDrawMode(mode: "add" | "delete" | null): void;
+  setStarred(ids: number[]): void;
+  setStarReview(on: boolean): void;
 }
 
 interface Props {
@@ -55,6 +59,7 @@ interface Props {
   onBandChanged?: (top: number, height: number) => void;
   onMaskTapped?: (id: number) => void;
   onDrawRect?: (page: number, mode: "add" | "delete", rect: Rect) => void;
+  onMaskStarred?: (id: number, starred: number[]) => void;
   onError?: (msg: string) => void;
 }
 
@@ -69,6 +74,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
     onBandChanged,
     onMaskTapped,
     onDrawRect,
+    onMaskStarred,
     onError,
   },
   ref,
@@ -107,6 +113,8 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
       setEditMode: (on) => dispatch({ cmd: "setEditMode", reqId: "c", editOn: on }),
       setEditCards: (cards) => dispatch({ cmd: "setEditCards", reqId: "c", editCards: cards }),
       setDrawMode: (mode) => dispatch({ cmd: "setDrawMode", reqId: "c", drawMode: mode }),
+      setStarred: (ids) => dispatch({ cmd: "setStarred", reqId: "c", starred: ids }),
+      setStarReview: (on) => dispatch({ cmd: "setStarReview", reqId: "c", starReview: on }),
     }),
     [dispatch],
   );
@@ -126,6 +134,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         id?: number;
         mode?: "add" | "delete";
         rect?: Rect;
+        starred?: number[];
       };
       try {
         m = JSON.parse(e.nativeEvent.data);
@@ -160,6 +169,9 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
           if (typeof m.page === "number" && m.rect && (m.mode === "add" || m.mode === "delete"))
             onDrawRect?.(m.page, m.mode, m.rect);
           break;
+        case "mask-starred":
+          if (typeof m.id === "number") onMaskStarred?.(m.id, m.starred ?? []);
+          break;
         case "error":
           onError?.(String(m.message ?? "engine error"));
           break;
@@ -174,6 +186,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
       onBandChanged,
       onMaskTapped,
       onDrawRect,
+      onMaskStarred,
       onError,
     ],
   );

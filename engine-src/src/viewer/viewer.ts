@@ -31,6 +31,8 @@ export interface OpenBookArgs {
   sheetOn?: boolean;
   /** Revealed card ids to restore from the last session (whole answer reveals together). */
   revealed?: number[];
+  /** Starred answer ids (review-only mode masks just these). */
+  starred?: number[];
   /** Manual red sheet: whether it was on, and its band position/height, last session. */
   manualOn?: boolean;
   band?: { top: number; height: number };
@@ -111,6 +113,9 @@ export class Viewer {
     y: number;
     el: HTMLElement;
   } | null = null;
+  // Study tracking: starred answers (long-press a mask) + a review-only mode that masks just them.
+  private starred = new Set<number>();
+  private starReview = false;
 
   constructor(root: HTMLElement, emit: Emit) {
     this.root = root;
@@ -136,6 +141,7 @@ export class Viewer {
     this.zoom = a.zoom ?? 1;
     this.sheetOn = a.sheetOn ?? true;
     this.revealed = new Set(a.revealed ?? []); // restore last session's reveal state
+    this.starred = new Set(a.starred ?? []);
     if (a.band) this.band = { top: a.band.top, height: a.band.height };
     this.current = clamp(a.page ?? 0, 0, this.pageCount - 1);
 
@@ -196,16 +202,8 @@ export class Viewer {
       });
     }
 
-    if (this.mode === "paged") {
-      const left = document.createElement("div");
-      left.className = "tapzone left";
-      left.onclick = () => this.goToPage(this.current - 1);
-      const right = document.createElement("div");
-      right.className = "tapzone right";
-      right.onclick = () => this.goToPage(this.current + 1);
-      this.root.appendChild(left);
-      this.root.appendChild(right);
-    }
+    // No edge tap-zones: in 横読み the page-flip is driven by the native ‹ › / slider so a tap on a
+    // mask near the screen edge reveals/stars it instead of accidentally turning the page.
 
     this.io = new IntersectionObserver(this.onIntersect, {
       root: this.root,
@@ -240,10 +238,13 @@ export class Viewer {
     const fitScale = w / this.pageW;
     v.maskLayer.innerHTML = "";
     for (const c of v.cards) {
+      // ★復習: mask only the starred answers; the rest stay shown (no mask).
+      if (this.starReview && !this.editMode && !this.starred.has(c.id)) continue;
       // The whole answer (card) reveals together — a wrapped answer stays one card, while
       // detection keeps genuinely separate answers as separate cards.
       const rev = !this.editMode && this.revealed.has(c.id);
-      for (const r of c.rects) {
+      const starred = !this.editMode && this.starred.has(c.id);
+      c.rects.forEach((r, i) => {
         const m = document.createElement("div");
         m.className = this.editMode ? "vmask vedit" : rev ? "vmask revealed" : "vmask";
         m.dataset.cardId = String(c.id);
@@ -251,15 +252,89 @@ export class Viewer {
         m.style.top = `${r.y * fitScale}px`;
         m.style.width = `${r.w * fitScale}px`;
         m.style.height = `${r.h * fitScale}px`;
-        const id = c.id;
-        m.onclick = (e) => {
-          e.stopPropagation();
-          if (this.editMode) this.emit({ type: "mask-tapped", id });
-          else this.toggleCard(id);
-        };
+        if (starred && i === 0) {
+          const badge = document.createElement("span");
+          badge.className = "vstar";
+          badge.textContent = "★";
+          m.appendChild(badge);
+        }
+        this.attachMaskPress(m, c.id);
         v.maskLayer.appendChild(m);
-      }
+      });
     }
+  }
+
+  // Tap = reveal (delete in edit mode); a ~500ms hold = star (★). A drag cancels both.
+  private attachMaskPress(m: HTMLElement, id: number): void {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let long = false;
+    let sx = 0;
+    let sy = 0;
+    const clear = (): void => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+    m.addEventListener(
+      "touchstart",
+      (e: TouchEvent) => {
+        long = false;
+        const t = e.touches[0];
+        sx = t.clientX;
+        sy = t.clientY;
+        clear();
+        timer = setTimeout(() => {
+          timer = null;
+          if (!this.editMode) {
+            long = true;
+            this.toggleStar(id);
+          }
+        }, 500);
+      },
+      { passive: true },
+    );
+    m.addEventListener(
+      "touchmove",
+      (e: TouchEvent) => {
+        const t = e.touches[0];
+        if (Math.hypot(t.clientX - sx, t.clientY - sy) > 10) clear();
+      },
+      { passive: true },
+    );
+    m.addEventListener("touchend", clear, { passive: true });
+    m.addEventListener("touchcancel", clear, { passive: true });
+    m.onclick = (e) => {
+      e.stopPropagation();
+      if (long) {
+        long = false; // the hold already starred; swallow the click so it doesn't also reveal
+        return;
+      }
+      if (this.editMode) this.emit({ type: "mask-tapped", id });
+      else this.toggleCard(id);
+    };
+  }
+
+  // Flip the star locally + update the ★ badge in place (no relayout → don't destroy the element
+  // mid-press) and report it so the native side persists it. The ★復習 filter re-applies on the
+  // next natural relayout.
+  private toggleStar(id: number): void {
+    const on = !this.starred.has(id);
+    if (on) this.starred.add(id);
+    else this.starred.delete(id);
+    for (const v of this.views) {
+      v.maskLayer.querySelectorAll(`[data-card-id="${id}"]`).forEach((el, i) => {
+        const node = el as HTMLElement;
+        node.querySelector(".vstar")?.remove();
+        if (on && i === 0 && !this.editMode) {
+          const badge = document.createElement("span");
+          badge.className = "vstar";
+          badge.textContent = "★";
+          node.appendChild(badge);
+        }
+      });
+    }
+    this.emit({ type: "mask-starred", id, starred: [...this.starred] });
   }
 
   private toggleCard(id: number): void {
@@ -656,6 +731,19 @@ export class Viewer {
   setDrawMode(mode: "add" | "delete" | null): void {
     this.drawMode = mode;
     this.root.classList.toggle("drawing", mode != null);
+  }
+
+  // ---- study tracking ----
+  setStarred(ids: number[]): void {
+    this.starred = new Set(ids);
+    const w = this.cssW();
+    for (const v of this.views) this.layoutMasks(v, w);
+  }
+
+  setStarReview(on: boolean): void {
+    this.starReview = on;
+    const w = this.cssW();
+    for (const v of this.views) this.layoutMasks(v, w);
   }
 
   private positionDraw(): void {
