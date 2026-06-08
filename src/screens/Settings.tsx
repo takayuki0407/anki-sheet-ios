@@ -25,6 +25,7 @@ import {
 } from "../db/repo";
 import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "../types";
 import { colors } from "../ui/theme";
+import { deckBookId, uploadContent } from "../sync/deck";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const hueDist = (a: number, b: number) => {
@@ -134,6 +135,11 @@ export function Settings({ deckId }: { deckId: number }) {
         setProgress(`検出 ${pr.page}/${pr.total} … ${pr.found}件`),
       );
       const n = await redetectDeck(deckId, color, det.clozes);
+      // Pro: re-sync rebuilt masks to other devices (best-effort; PDF unchanged → content only).
+      void (async () => {
+        const bid = await deckBookId(deckId);
+        if (bid) await uploadContent(bid, deckId);
+      })().catch(() => {});
       Alert.alert("再検出が完了", `${n} 件の答えを検出しました。`, [
         { text: "OK", onPress: () => setView({ name: "viewer", deckId }) },
       ]);

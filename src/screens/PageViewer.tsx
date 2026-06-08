@@ -38,7 +38,7 @@ import {
 import type { BookmarkRow, CardRow, ReadMode } from "../db/rows";
 import type { Rect } from "../types";
 import { getProgress, idToken, putProgress } from "../sync/api";
-import { deckBookId } from "../sync/deck";
+import { deckBookId, refreshContent, uploadContent } from "../sync/deck";
 import { colors } from "../ui/theme";
 
 type FitMode = "width" | "page";
@@ -125,13 +125,10 @@ export function PageViewer({ deckId }: { deckId: number }) {
     let alive = true;
     (async () => {
       try {
-        const [uri, deck, pdf, cards, revealRaw, starRaw] = await Promise.all([
+        const [uri, deck, pdf] = await Promise.all([
           ensureEngine(),
           getDeck(deckId),
           getDeckPdf(deckId),
-          deckCards(deckId),
-          getMeta(`reveal:${deckId}`),
-          getMeta(`star:${deckId}`),
         ]);
         if (!alive) return;
         if (!deck || !pdf) {
@@ -139,6 +136,16 @@ export function PageViewer({ deckId }: { deckId: number }) {
           return;
         }
         pdfIdRef.current = pdf.id;
+        // Pro: pull newer masks from the cloud BEFORE reading cards (last-write-wins; fail-open so
+        // signed-out / offline / no-change just keeps the local set).
+        await refreshContent(deckId).catch(() => {});
+        if (!alive) return;
+        const [cards, revealRaw, starRaw] = await Promise.all([
+          deckCards(deckId),
+          getMeta(`reveal:${deckId}`),
+          getMeta(`star:${deckId}`),
+        ]);
+        if (!alive) return;
         let startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
         let startMode: ReadMode = deck.lastMode ?? "scroll";
         // Restore the red overlay (mode + reveals + band) from last session.
@@ -434,6 +441,11 @@ export function PageViewer({ deckId }: { deckId: number }) {
     for (const id of editDels) await deleteCard(id);
     for (const a of editAdds) await addCard(deckId, pdfIdRef.current, a.pageIndex, a.rect);
     cardsRef.current = await deckCards(deckId); // refresh base set (also feeds reveal keys)
+    // Pro: re-sync content so the mask add/delete reaches other devices (best-effort; PDF unchanged).
+    void (async () => {
+      const bid = await deckBookId(deckId);
+      if (bid) await uploadContent(bid, deckId);
+    })().catch(() => {});
     discardEdits();
     setEditMode(false);
     restoreAfterEdit();
