@@ -88,6 +88,7 @@ export function DeckList() {
   const regenRef = useRef(false);
   // Books in the account that aren't on THIS device yet → one-tap cloud download (Pro).
   const [cloud, setCloud] = useState<AccountBook[]>([]);
+  const [cloudPro, setCloudPro] = useState(false); // cloud section is Pro-only (download/restore)
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -108,6 +109,7 @@ export function DeckList() {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
       setCloud(acct.books.filter((b) => !local.has(b.book_id)));
+      setCloudPro(acct.unlimited); // cloud download/restore is Pro/admin-only
       void backfillCloudIfPro(); // Pro: upload any local book that has no cloud file yet
       // Adopt favorite / latest-opened state set on other devices for books we also have locally.
       let changed = false;
@@ -126,6 +128,7 @@ export function DeckList() {
       if (changed) await load();
     } catch {
       setCloud([]); // signed out / offline — no cloud section
+      setCloudPro(false);
     }
   }, [load]);
 
@@ -154,30 +157,6 @@ export function DeckList() {
     },
     [load, bumpDecks],
   );
-
-  // Standard: a cloud book is only a registered slot (no file) → can't download, but can be
-  // released to free the account-global count.
-  const onRemoveCloud = useCallback((b: AccountBook) => {
-    Alert.alert(
-      "アカウントから削除",
-      `「${b.name || "（無題）"}」をアカウントの登録から削除します（冊数の枠が空きます）。`,
-      [
-        { text: "キャンセル", style: "cancel" },
-        {
-          text: "削除",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await unregisterBook(b.book_id);
-              setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
-            } catch (e) {
-              Alert.alert("エラー", syncErrorMessage(e));
-            }
-          },
-        },
-      ],
-    );
-  }, []);
 
   useEffect(() => {
     getMeta("bookshelfView").then((v) => {
@@ -465,21 +444,22 @@ export function DeckList() {
           contentContainerStyle={styles.grid}
           renderItem={viewMode === "list" ? renderList : renderGrid}
           ListFooterComponent={
-            cloud.length > 0 ? (
+            cloudPro && cloud.length > 0 ? (
               <View style={styles.cloudSection}>
                 <Text style={styles.cloudTitle}>クラウド（他の端末の本）</Text>
                 <Text style={styles.cloudNote}>
-                  クラウドに保存済み（Proで取り込み）の本は取り込めます。ファイルの無い本（Standardの枠のみ）は削除して枠を空けられます。
+                  同じアカウントの本です。タップでこの端末に取り込めます。
                 </Text>
-                {cloud.map((b) => (
-                  <View key={b.book_id} style={styles.cloudRow}>
-                    <View style={styles.cloudInfo}>
-                      <Text style={styles.cloudName} numberOfLines={1}>
-                        {b.name || "（無題）"}
-                      </Text>
-                      {b.device ? <Text style={styles.cloudDevice}>{b.device}</Text> : null}
-                    </View>
-                    {b.size > 0 ? (
+                {cloud
+                  .filter((b) => b.size > 0)
+                  .map((b) => (
+                    <View key={b.book_id} style={styles.cloudRow}>
+                      <View style={styles.cloudInfo}>
+                        <Text style={styles.cloudName} numberOfLines={1}>
+                          {b.name || "（無題）"}
+                        </Text>
+                        {b.device ? <Text style={styles.cloudDevice}>{b.device}</Text> : null}
+                      </View>
                       <Pressable
                         style={styles.cloudBtn}
                         disabled={downloading.has(b.book_id)}
@@ -489,13 +469,8 @@ export function DeckList() {
                           {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
                         </Text>
                       </Pressable>
-                    ) : (
-                      <Pressable style={styles.cloudBtn} onPress={() => onRemoveCloud(b)}>
-                        <Text style={styles.cloudBtnText}>削除</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                ))}
+                    </View>
+                  ))}
               </View>
             ) : null
           }
