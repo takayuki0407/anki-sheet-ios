@@ -78,9 +78,17 @@ export class Viewer {
   private scrollRaf = 0;
   // two-finger pinch zoom (smooth: CSS transform during the gesture, real relayout on end)
   private pinch = { active: false, startDist: 1, startZoom: 1, fcx: 0, fcy: 0, scale: 1 };
-  // One-finger axis lock: vertical = native momentum scroll; horizontal = JS pan (so a careless
-  // vertical swipe never drifts sideways). The axis is chosen from the initial drag direction.
-  private hpan = { startX: 0, startY: 0, lastX: 0, axis: "none" as "none" | "v" | "h" };
+  // One-finger movement: the finger drives horizontal (JS scrollLeft) while the browser scrolls
+  // vertically (native momentum, smooth) — so diagonal panning follows the finger. The horizontal
+  // is suppressed ONLY for a quick, clearly-vertical flick ("vlock"), so a careless fast vertical
+  // swipe doesn't drift sideways. Everything else ("free") follows the finger in 2D.
+  private hpan = {
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    startT: 0,
+    axis: "none" as "none" | "vlock" | "free",
+  };
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
@@ -482,10 +490,11 @@ export class Viewer {
         this.contentEl.style.transformOrigin = `${this.pinch.fcx}px ${this.pinch.fcy}px`;
       e.preventDefault();
     }
-    // One-finger: record the start for the horizontal-pan axis lock (vertical stays native).
+    // One-finger: record the start so the first move can classify the gesture (vlock vs free).
     const t = e.touches[0];
     this.hpan.startX = this.hpan.lastX = t.clientX;
     this.hpan.startY = t.clientY;
+    this.hpan.startT = performance.now();
     this.hpan.axis = "none";
   };
 
@@ -512,13 +521,16 @@ export class Viewer {
     if (this.hpan.axis === "none") {
       const dx = t.clientX - this.hpan.startX;
       const dy = t.clientY - this.hpan.startY;
-      if (Math.hypot(dx, dy) < 8) return; // wait until the drag direction is clear
-      // |dx| > |dy| → horizontal pan (JS); otherwise vertical → native scroll (no sideways drift).
-      this.hpan.axis = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
+      const dist = Math.hypot(dx, dy);
+      if (dist < 10) return; // wait until the gesture's intent is clear
+      const speed = dist / Math.max(1, performance.now() - this.hpan.startT); // px/ms
+      // Lock to vertical ONLY for a quick + clearly-vertical flick; otherwise follow the finger.
+      this.hpan.axis = Math.abs(dy) > Math.abs(dx) * 2 && speed > 0.5 ? "vlock" : "free";
     }
-    if (this.hpan.axis === "h") {
+    if (this.hpan.axis === "free") {
+      // Drive horizontal with the finger; the browser still scrolls vertically (pan-y), so a
+      // diagonal drag moves in 2D. (No preventDefault → native vertical momentum stays smooth.)
       this.root.scrollLeft -= t.clientX - this.hpan.lastX;
-      e.preventDefault(); // we own horizontal; block the browser's pan-y handling of it
     }
     this.hpan.lastX = t.clientX;
   };
