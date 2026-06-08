@@ -12,6 +12,20 @@ export async function idToken(): Promise<string | null> {
   return user ? user.getIdToken() : null;
 }
 
+/** Translate a sync/cloud error into a clear, user-facing message (the raw text is jargon). */
+export function syncErrorMessage(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (m === "not_signed_in") return "サインインが必要です。ログインしてからお試しください。";
+  if (/\b404\b/.test(m))
+    return "このPDFはクラウドに保存されていません。クラウドからの取得は、Proプランで取り込んだ本のみ可能です（Standardプランはクラウド保存なし）。";
+  if (/\b403\b/.test(m))
+    return "この操作はProプラン限定です。Proにアップグレードするとクラウド保存・取得が使えます。";
+  if (/\b5\d\d\b/.test(m)) return "サーバーで一時的なエラーが発生しました。時間をおいて再試行してください。";
+  if (/network|fetch|timeout/i.test(m))
+    return "ネットワークに接続できません。通信環境を確認して再試行してください。";
+  return `取得に失敗しました（${m}）。`;
+}
+
 async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = await idToken();
   if (!token) throw new Error("not_signed_in");

@@ -20,7 +20,13 @@ import {
   setMeta,
 } from "../db/repo";
 import { exportBackup, importBackup } from "../db/backup";
-import { listBooks, unregisterBook, updateBookMeta, type AccountBook } from "../sync/api";
+import {
+  listBooks,
+  syncErrorMessage,
+  unregisterBook,
+  updateBookMeta,
+  type AccountBook,
+} from "../sync/api";
 import { deckBookId, downloadDeck, localBookIds } from "../sync/deck";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
@@ -136,7 +142,7 @@ export function DeckList() {
         await load();
         setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
       } catch (e) {
-        Alert.alert("取り込みエラー", e instanceof Error ? e.message : String(e));
+        Alert.alert("クラウドから取り込めませんでした", syncErrorMessage(e));
       } finally {
         setDownloading((s) => {
           const n = new Set(s);
