@@ -230,3 +230,18 @@ export async function importBackup(fileUri: string): Promise<void> {
     if (staging.exists) staging.delete();
   });
 }
+
+/** Erase ALL local data (decks / PDFs / covers / bookmarks / sync meta) — used on logout / account
+ * deletion so the bookshelf is empty for the next account. Pro books re-download from the cloud. */
+export async function clearAllLocalData(): Promise<void> {
+  await withWriteLock(async () => {
+    const db = await getDb();
+    await db.withTransactionAsync(async () => {
+      for (const t of ["cards", "bookmarks", "pdfs", "covers", "meta", "decks"]) {
+        await db.runAsync(`DELETE FROM ${t}`);
+      }
+    });
+  });
+  const decksDir = new Directory(Paths.document, "decks");
+  if (decksDir.exists) decksDir.delete();
+}

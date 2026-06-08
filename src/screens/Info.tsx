@@ -15,6 +15,7 @@ import * as StoreReview from "expo-store-review";
 import { useApp } from "../store/session";
 import { STANDARD_DECK_LIMIT, effectiveTier, useEntitlements } from "../iap/entitlements";
 import { deckCountTotal } from "../db/repo";
+import { clearAllLocalData } from "../db/backup";
 import { restore } from "../iap/purchases";
 import { deleteAccount, signOut, useAccount } from "../auth/account";
 import {
@@ -123,18 +124,33 @@ export function Info() {
     }
   }, []);
 
-  const onSignOut = useCallback(async () => {
-    try {
-      await signOut();
-    } catch (e) {
-      Alert.alert("エラー", e instanceof Error ? e.message : String(e));
-    }
-  }, []);
+  const onSignOut = useCallback(() => {
+    Alert.alert(
+      "ログアウト",
+      "ログアウトすると、この端末に保存されている本はすべて削除されます（Proでクラウドに保存済みの本は再ログインで取得できます）。よろしいですか？",
+      [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "ログアウト",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await signOut();
+              await clearAllLocalData();
+              setView({ name: "decks" });
+            } catch (e) {
+              Alert.alert("エラー", e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
+  }, [setView]);
 
   const onDeleteAccount = useCallback(() => {
     Alert.alert(
       "アカウントを削除",
-      "アカウントと、クラウドに保存されたPDF・進捗をすべて削除します。この操作は取り消せません（この端末内のデータは残ります）。",
+      "アカウントと、クラウドに保存されたPDF・進捗をすべて削除します。この端末内のデータもすべて削除されます。この操作は取り消せません。",
       [
         { text: "キャンセル", style: "cancel" },
         {
@@ -143,8 +159,9 @@ export function Info() {
           onPress: async () => {
             try {
               await deleteAccount();
-              setView({ name: "decks" }); // back to the bookshelf (now signed out)
-              Alert.alert("削除しました", "アカウントとクラウドのデータを削除しました。");
+              await clearAllLocalData(); // also wipe this device's library
+              setView({ name: "decks" }); // back to the (now empty) bookshelf, signed out
+              Alert.alert("削除しました", "アカウントとデータをすべて削除しました。");
             } catch (e) {
               const code = (e as { code?: string }).code;
               Alert.alert(

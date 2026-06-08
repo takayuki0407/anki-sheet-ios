@@ -88,6 +88,7 @@ export function DeckList() {
   const regenRef = useRef(false);
   // Books in the account that aren't on THIS device yet → one-tap cloud download (Pro).
   const [cloud, setCloud] = useState<AccountBook[]>([]);
+  const [cloudPro, setCloudPro] = useState(false); // account can actually fetch cloud PDFs (pro/admin)
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
@@ -108,6 +109,7 @@ export function DeckList() {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
       setCloud(acct.books.filter((b) => !local.has(b.book_id)));
+      setCloudPro(acct.unlimited); // standard accounts don't store cloud PDFs → can't download
       // Adopt favorite / latest-opened state set on other devices for books we also have locally.
       let changed = false;
       for (const b of acct.books) {
@@ -125,6 +127,7 @@ export function DeckList() {
       if (changed) await load();
     } catch {
       setCloud([]); // signed out / offline — no cloud section
+      setCloudPro(false);
     }
   }, [load]);
 
@@ -443,6 +446,11 @@ export function DeckList() {
             cloud.length > 0 ? (
               <View style={styles.cloudSection}>
                 <Text style={styles.cloudTitle}>クラウド（他の端末の本）</Text>
+                {!cloudPro && (
+                  <Text style={styles.cloudNote}>
+                    クラウドからの取得はProプラン限定です（Standardプランはクラウド保存なし）。
+                  </Text>
+                )}
                 {cloud.map((b) => (
                   <View key={b.book_id} style={styles.cloudRow}>
                     <View style={styles.cloudInfo}>
@@ -451,15 +459,19 @@ export function DeckList() {
                       </Text>
                       {b.device ? <Text style={styles.cloudDevice}>{b.device}</Text> : null}
                     </View>
-                    <Pressable
-                      style={styles.cloudBtn}
-                      disabled={downloading.has(b.book_id)}
-                      onPress={() => onDownload(b)}
-                    >
-                      <Text style={styles.cloudBtnText}>
-                        {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
-                      </Text>
-                    </Pressable>
+                    {cloudPro ? (
+                      <Pressable
+                        style={styles.cloudBtn}
+                        disabled={downloading.has(b.book_id)}
+                        onPress={() => onDownload(b)}
+                      >
+                        <Text style={styles.cloudBtnText}>
+                          {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <Text style={styles.cloudLocked}>Pro限定</Text>
+                    )}
                   </View>
                 ))}
               </View>
@@ -566,6 +578,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   cloudTitle: { fontSize: 13, fontWeight: "700", color: colors.textSub, marginBottom: 2 },
+  cloudNote: { fontSize: 12, color: colors.muted, marginBottom: 4, lineHeight: 17 },
+  cloudLocked: { fontSize: 12, color: colors.muted, fontWeight: "600" },
   cloudRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
   cloudInfo: { flex: 1 },
   cloudName: { fontSize: 14, fontWeight: "600", color: colors.text },
