@@ -16,6 +16,8 @@ import * as Sharing from "expo-sharing";
 import { useApp } from "../store/session";
 import { deleteDeck, getCover, listDecks } from "../db/repo";
 import { exportBackup } from "../db/backup";
+import { unregisterBook } from "../sync/api";
+import { deckBookId } from "../sync/deck";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
 
@@ -88,7 +90,13 @@ export function DowngradeSelect({
           onPress: async () => {
             try {
               setBusy(true);
-              for (const it of remove) await deleteDeck(it.deck.id);
+              for (const it of remove) {
+                // Also free the account slot + cloud file so a downgrade trims the ACCOUNT to the
+                // Standard limit, not just this device (else the cloud stays over-plan).
+                const bid = await deckBookId(it.deck.id);
+                if (bid) await unregisterBook(bid).catch(() => {});
+                await deleteDeck(it.deck.id);
+              }
               await onResolved();
               setView({ name: "decks" });
             } catch (e) {
