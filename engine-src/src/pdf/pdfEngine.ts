@@ -148,11 +148,15 @@ function detectScale(): number {
   return DETECT_SCALE;
 }
 
-/** Render page 1 of a PDF to a small JPEG cover thumbnail. */
-export async function renderCover(data: ArrayBuffer | Blob, maxWidth = 240): Promise<Blob> {
+/** Render a page (default page 1) of a PDF to a small JPEG thumbnail. pageIndex is 0-based. */
+export async function renderCover(
+  data: ArrayBuffer | Blob,
+  maxWidth = 240,
+  pageIndex = 0,
+): Promise<Blob> {
   const doc = await loadPdf(data);
   try {
-    const page = await doc.getPage(1);
+    const page = await doc.getPage(pageIndex + 1);
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const vp1 = page.getViewport({ scale: 1 });
     const canvas = await renderPage(page, (maxWidth / vp1.width) * dpr);
@@ -164,6 +168,35 @@ export async function renderCover(data: ArrayBuffer | Blob, maxWidth = 240): Pro
     canvas.height = 0;
     if (!blob) throw new Error("cover render failed");
     return blob;
+  } finally {
+    await doc.loadingTask.destroy();
+  }
+}
+
+/** Extract plain text for the given pages (0-based) for AI question generation. Loads the PDF once. */
+export async function getPagesText(
+  data: ArrayBuffer | Blob,
+  pages: number[],
+): Promise<{ page: number; text: string }[]> {
+  const doc = await loadPdf(data);
+  try {
+    const out: { page: number; text: string }[] = [];
+    for (const idx of pages) {
+      const page = await doc.getPage(idx + 1);
+      try {
+        const tc = await page.getTextContent();
+        let text = "";
+        for (const item of tc.items) {
+          if (!("str" in item)) continue; // skip TextMarkedContent
+          text += item.str;
+          if (item.hasEOL) text += "\n";
+        }
+        out.push({ page: idx, text: text.replace(/\n{3,}/g, "\n\n").trim() });
+      } finally {
+        page.cleanup();
+      }
+    }
+    return out;
   } finally {
     await doc.loadingTask.destroy();
   }

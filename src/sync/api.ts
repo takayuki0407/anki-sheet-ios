@@ -26,7 +26,7 @@ export function syncErrorMessage(e: unknown): string {
   return `取得に失敗しました（${m}）。`;
 }
 
-async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = await idToken();
   if (!token) throw new Error("not_signed_in");
   return fetch(`${SYNC_BASE}${path}`, {

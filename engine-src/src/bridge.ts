@@ -15,6 +15,7 @@ import {
   CancelledError,
   detectClozesInPdf,
   detectOnPage,
+  getPagesText,
   loadPdf,
   renderCover,
 } from "./pdf/pdfEngine";
@@ -53,6 +54,7 @@ interface Cmd {
   color?: DeckColorConfig;
   auto?: boolean; // first import: auto-pick the answer color before detecting
   maxWidth?: number;
+  pages?: number[]; // pageText: which 0-based pages to extract text for
   // viewer / openBook
   mode?: ViewMode;
   page?: number;
@@ -110,12 +112,23 @@ async function detectAll(m: Cmd): Promise<void> {
   }
 }
 
-/** Render page 1 to a small JPEG cover thumbnail (returned as a data URL). */
+/** Render a page (default page 1) to a small JPEG thumbnail (returned as a data URL). */
 async function cover(m: Cmd): Promise<void> {
   try {
     const data = await pdfBytes(m);
-    const blob = await renderCover(data, m.maxWidth ?? 240);
+    const blob = await renderCover(data, m.maxWidth ?? 240, typeof m.page === "number" ? m.page : 0);
     post({ type: "cover", reqId: m.reqId, dataUrl: await blobToDataURL(blob) });
+  } catch (e) {
+    post({ type: "error", reqId: m.reqId, message: errMsg(e) });
+  }
+}
+
+/** Extract plain text for the requested pages (for AI question generation). */
+async function pageText(m: Cmd): Promise<void> {
+  try {
+    const data = await pdfBytes(m);
+    const texts = await getPagesText(data, m.pages ?? []);
+    post({ type: "pageText", reqId: m.reqId, texts });
   } catch (e) {
     post({ type: "error", reqId: m.reqId, message: errMsg(e) });
   }
@@ -165,6 +178,7 @@ function getViewer(): Viewer {
 const handlers: Record<string, (m: Cmd) => void> = {
   detectAll,
   cover,
+  pageText,
   previewPage,
   cancel: (m) => aborters.get(m.reqId)?.abort(),
   ping: (m) => post({ type: "pong", reqId: m.reqId, buildId: __BUILD_ID__ }),

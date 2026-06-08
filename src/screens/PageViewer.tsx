@@ -569,6 +569,9 @@ export function PageViewer({ deckId }: { deckId: number }) {
         <Text style={styles.title} numberOfLines={1}>
           {name}
         </Text>
+        <Pressable onPress={() => setView({ name: "quiz", deckId })} hitSlop={10}>
+          <Text style={styles.topBtn}>問題</Text>
+        </Pressable>
         <Pressable onPress={() => setView({ name: "settings", deckId })} hitSlop={10}>
           <Text style={styles.topBtn}>⚙</Text>
         </Pressable>

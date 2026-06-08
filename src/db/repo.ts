@@ -3,7 +3,7 @@
 // here, and PDFs are moved to disk on import.
 import type { SQLiteDatabase } from "expo-sqlite";
 import { DEFAULT_MAGENTA_BAND, type DeckColorConfig, type DetectedCloze, type Rect } from "../types";
-import type { BookmarkRow, CardRow, DeckRow, PdfRow, ReadMode } from "./rows";
+import type { BookmarkRow, CardRow, DeckRow, PdfRow, QuestionRow, ReadMode } from "./rows";
 import { getDb, withWriteLock } from "./database";
 import { deckPdfFile, deleteDeckPdf, savePdfForDeck } from "./files";
 
@@ -393,4 +393,67 @@ export async function getMeta(key: string): Promise<string | undefined> {
 export async function setMeta(key: string, value: string): Promise<void> {
   const db = await getDb();
   await db.runAsync("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [key, value]);
+}
+
+// ---- AI-generated ○× questions (keyed by the cross-device bookId) ----
+
+const Q_COLS =
+  "id, bookId, pageIndex, statement, answer, explanation, source, createdAt";
+const Q_INSERT =
+  "INSERT OR REPLACE INTO questions (id, bookId, pageIndex, statement, answer, explanation, source, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+const qBinds = (q: QuestionRow): (string | number)[] => [
+  q.id,
+  q.bookId,
+  q.pageIndex,
+  q.statement,
+  q.answer,
+  q.explanation,
+  q.source,
+  q.createdAt,
+];
+
+/** Replace one page's questions (initial generation or regeneration). */
+export async function savePageQuestions(
+  bookId: string,
+  pageIndex: number,
+  qs: QuestionRow[],
+): Promise<void> {
+  const db = await getDb();
+  await withWriteLock(async () => {
+    await db.runAsync("DELETE FROM questions WHERE bookId = ? AND pageIndex = ?", [bookId, pageIndex]);
+    for (const q of qs) await db.runAsync(Q_INSERT, qBinds(q));
+  });
+}
+
+/** All questions in a book (the quiz set). */
+export async function getBookQuestions(bookId: string): Promise<QuestionRow[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<QuestionRow>(
+    `SELECT ${Q_COLS} FROM questions WHERE bookId = ? ORDER BY pageIndex, createdAt`,
+    [bookId],
+  );
+  return rows.map((r) => ({ ...r, answer: r.answer === "誤" ? "誤" : "正" }));
+}
+
+/** Per-page question counts for a book. */
+export async function bookQuestionCounts(bookId: string): Promise<Map<number, number>> {
+  const rows = await getBookQuestions(bookId);
+  const m = new Map<number, number>();
+  for (const q of rows) m.set(q.pageIndex, (m.get(q.pageIndex) ?? 0) + 1);
+  return m;
+}
+
+/** Replace ALL of a book's questions (cloud restore for Pro+). */
+export async function putBookQuestions(bookId: string, qs: QuestionRow[]): Promise<void> {
+  const db = await getDb();
+  await withWriteLock(async () => {
+    await db.runAsync("DELETE FROM questions WHERE bookId = ?", [bookId]);
+    for (const q of qs) await db.runAsync(Q_INSERT, qBinds(q));
+  });
+}
+
+/** Delete a book's questions (on book delete). */
+export async function deleteBookQuestions(bookId: string): Promise<void> {
+  const db = await getDb();
+  await withWriteLock(() => db.runAsync("DELETE FROM questions WHERE bookId = ?", [bookId]));
 }

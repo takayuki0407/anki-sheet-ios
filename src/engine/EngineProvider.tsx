@@ -25,7 +25,7 @@ interface EngineApi {
     onProgress?: (p: DetectProgress) => void,
     signal?: AbortSignal,
   ): Promise<PdfDetectionResult>;
-  cover(args: { url?: string; base64?: string; maxWidth?: number }): Promise<string>;
+  cover(args: { url?: string; base64?: string; maxWidth?: number; page?: number }): Promise<string>;
   preview(args: {
     url?: string;
     base64?: string;
@@ -33,6 +33,11 @@ interface EngineApi {
     page?: number;
     maxWidth?: number;
   }): Promise<{ dataUrl: string; count: number }>;
+  pageText(args: {
+    url?: string;
+    base64?: string;
+    pages: number[];
+  }): Promise<{ page: number; text: string }[]>;
 }
 
 const Ctx = createContext<EngineApi | null>(null);
@@ -71,8 +76,13 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     return ref.current.preview(args);
   }, []);
 
+  const pageText = useCallback<EngineApi["pageText"]>((args) => {
+    if (!ref.current) return Promise.reject(new Error("エンジン準備中です"));
+    return ref.current.pageText(args);
+  }, []);
+
   return (
-    <Ctx.Provider value={{ ready, buildId, error, detectAll, cover, preview }}>
+    <Ctx.Provider value={{ ready, buildId, error, detectAll, cover, preview, pageText }}>
       {children}
       {engineUri && (
         <EngineWebView

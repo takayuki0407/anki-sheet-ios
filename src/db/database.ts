@@ -78,6 +78,18 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS questions (
+      id          TEXT    PRIMARY KEY,
+      bookId      TEXT    NOT NULL,
+      pageIndex   INTEGER NOT NULL,
+      statement   TEXT    NOT NULL,
+      answer      TEXT    NOT NULL,
+      explanation TEXT,
+      source      TEXT,
+      createdAt   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_questions_book_page ON questions (bookId, pageIndex);
   `);
   return db;
 }

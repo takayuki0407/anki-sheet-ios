@@ -15,7 +15,7 @@ export interface EngineHandle {
     onProgress?: (p: DetectProgress) => void,
     signal?: AbortSignal,
   ): Promise<PdfDetectionResult>;
-  cover(args: { url?: string; base64?: string; maxWidth?: number }): Promise<string>;
+  cover(args: { url?: string; base64?: string; maxWidth?: number; page?: number }): Promise<string>;
   preview(args: {
     url?: string;
     base64?: string;
@@ -23,6 +23,11 @@ export interface EngineHandle {
     page?: number;
     maxWidth?: number;
   }): Promise<{ dataUrl: string; count: number }>;
+  pageText(args: {
+    url?: string;
+    base64?: string;
+    pages: number[];
+  }): Promise<{ page: number; text: string }[]>;
   ping(): Promise<{ buildId: string }>;
 }
 
@@ -82,6 +87,7 @@ export const EngineWebView = forwardRef<EngineHandle, Props>(function EngineWebV
         send<PdfDetectionResult>("detectAll", args, onProgress, signal),
       cover: (args) => send<string>("cover", args),
       preview: (args) => send<{ dataUrl: string; count: number }>("previewPage", args),
+      pageText: (args) => send<{ page: number; text: string }[]>("pageText", args),
       ping: () => send<{ buildId: string }>("ping", {}),
     }),
     [send],
@@ -115,6 +121,10 @@ export const EngineWebView = forwardRef<EngineHandle, Props>(function EngineWebV
           break;
         case "preview":
           p.resolve({ dataUrl: m.dataUrl, count: m.count });
+          pending.current.delete(m.reqId!);
+          break;
+        case "pageText":
+          p.resolve(m.texts);
           pending.current.delete(m.reqId!);
           break;
         case "pong":

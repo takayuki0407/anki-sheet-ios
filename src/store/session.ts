@@ -7,6 +7,7 @@ export type View =
   | { name: "import" }
   | { name: "viewer"; deckId: number }
   | { name: "settings"; deckId: number }
+  | { name: "quiz"; deckId: number }
   | { name: "paywall" }
   | { name: "info" }
   | { name: "login" }

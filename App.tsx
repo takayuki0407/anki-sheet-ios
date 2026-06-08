@@ -12,6 +12,7 @@ import { DeckList } from "./src/screens/DeckList";
 import { ImportWizard } from "./src/screens/ImportWizard";
 import { PageViewer } from "./src/screens/PageViewer";
 import { Settings } from "./src/screens/Settings";
+import { Quiz } from "./src/screens/Quiz";
 import { Paywall } from "./src/screens/Paywall";
 import { Info } from "./src/screens/Info";
 import { Login } from "./src/screens/Login";
@@ -34,6 +35,8 @@ function Router() {
       return <PageViewer key={view.deckId} deckId={view.deckId} />;
     case "settings":
       return <Settings key={view.deckId} deckId={view.deckId} />;
+    case "quiz":
+      return <Quiz key={view.deckId} deckId={view.deckId} />;
     case "paywall":
       return <Paywall />;
     case "info":

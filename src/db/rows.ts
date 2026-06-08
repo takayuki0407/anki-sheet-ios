@@ -46,3 +46,15 @@ export interface BookmarkRow {
   title: string;
   createdAt: number;
 }
+
+/** An AI-generated true/false (○×) question, keyed by the cross-device bookId (syncs for Pro+). */
+export interface QuestionRow {
+  id: string;
+  bookId: string;
+  pageIndex: number;
+  statement: string;
+  answer: "正" | "誤";
+  explanation: string;
+  source: string;
+  createdAt: number;
+}

@@ -12,6 +12,7 @@ import * as DocumentPicker from "expo-document-picker";
 import {
   answerCount,
   deckCountTotal,
+  deleteBookQuestions,
   deleteDeck,
   getCover,
   getMeta,
@@ -348,7 +349,9 @@ export function DeckList() {
               // Local-only delete: do NOT remove the cloud copy. The account's cloud master persists
               // so OTHER devices keep it and this device can re-download it. Permanent cloud deletion
               // is the「クラウドから削除」action in the cloud section.
+              const bid = await deckBookId(deck.id);
               await deleteDeck(deck.id);
+              if (bid) void deleteBookQuestions(bid).catch(() => {}); // drop this device's AI questions
               bumpDecks();
               load();
               void loadCloud();
@@ -369,6 +372,7 @@ export function DeckList() {
           text: vm.favorite ? "お気に入りを解除" : "お気に入りに追加",
           onPress: () => toggleFavorite(deck),
         },
+        { text: "AI問題", onPress: () => setView({ name: "quiz", deckId: deck.id }) },
         { text: "設定・再検出", onPress: () => setView({ name: "settings", deckId: deck.id }) },
         { text: "削除", style: "destructive", onPress: () => confirmDelete(deck) },
         { text: "キャンセル", style: "cancel" },
