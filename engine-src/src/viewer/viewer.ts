@@ -95,6 +95,22 @@ export class Viewer {
   private manualSheetEl: HTMLElement | null = null;
   private manualGripEl: HTMLElement | null = null; // small handle centred on the top edge
   private band = { top: 80, height: 150 };
+  // Manual mask editing: masks become outlines tappable to delete; a drag draws a rect (add /
+  // 範囲削除). The staged buffer + undo live on the native side; the viewer just shows the cards it
+  // is given and reports taps / drawn rects.
+  private editMode = false;
+  private drawMode: "add" | "delete" | null = null;
+  private draw: {
+    pageIndex: number;
+    left: number;
+    top: number;
+    w: number;
+    x0: number;
+    y0: number;
+    x: number;
+    y: number;
+    el: HTMLElement;
+  } | null = null;
 
   constructor(root: HTMLElement, emit: Emit) {
     this.root = root;
@@ -226,18 +242,20 @@ export class Viewer {
     for (const c of v.cards) {
       // The whole answer (card) reveals together — a wrapped answer stays one card, while
       // detection keeps genuinely separate answers as separate cards.
-      const rev = this.revealed.has(c.id);
+      const rev = !this.editMode && this.revealed.has(c.id);
       for (const r of c.rects) {
         const m = document.createElement("div");
-        m.className = rev ? "vmask revealed" : "vmask";
+        m.className = this.editMode ? "vmask vedit" : rev ? "vmask revealed" : "vmask";
         m.dataset.cardId = String(c.id);
         m.style.left = `${r.x * fitScale}px`;
         m.style.top = `${r.y * fitScale}px`;
         m.style.width = `${r.w * fitScale}px`;
         m.style.height = `${r.h * fitScale}px`;
+        const id = c.id;
         m.onclick = (e) => {
           e.stopPropagation();
-          this.toggleCard(c.id);
+          if (this.editMode) this.emit({ type: "mask-tapped", id });
+          else this.toggleCard(id);
         };
         v.maskLayer.appendChild(m);
       }
@@ -363,6 +381,35 @@ export class Viewer {
 
   private onTouchStart = (e: TouchEvent): void => {
     this.stopFling();
+    // Mask editing: a drag draws a rectangle on the page under the finger (add / 範囲削除).
+    if (this.editMode && this.drawMode && e.touches.length === 1) {
+      const t = e.touches[0];
+      const pageEl = (
+        document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null
+      )?.closest(".vpage") as HTMLElement | null;
+      if (pageEl) {
+        const r = pageEl.getBoundingClientRect();
+        const el = document.createElement("div");
+        el.className = this.drawMode === "delete" ? "vdrawrect del" : "vdrawrect";
+        pageEl.appendChild(el);
+        const x = t.clientX - r.left;
+        const y = t.clientY - r.top;
+        this.draw = {
+          pageIndex: Number(pageEl.dataset.page),
+          left: r.left,
+          top: r.top,
+          w: r.width,
+          x0: x,
+          y0: y,
+          x,
+          y,
+          el,
+        };
+        this.positionDraw();
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.touches.length >= 2) {
       this.pan.active = false;
       this.pinch.active = true;
@@ -390,6 +437,14 @@ export class Viewer {
   };
 
   private onTouchMove = (e: TouchEvent): void => {
+    if (this.draw && e.touches.length >= 1) {
+      const t = e.touches[0];
+      this.draw.x = t.clientX - this.draw.left;
+      this.draw.y = t.clientY - this.draw.top;
+      this.positionDraw();
+      e.preventDefault();
+      return;
+    }
     if (this.pinch.active && e.touches.length >= 2) {
       const d = this.touchDist(e.touches[0], e.touches[1]);
       const target = clamp(this.pinch.startZoom * (d / this.pinch.startDist), 0.5, 4);
@@ -424,6 +479,27 @@ export class Viewer {
   };
 
   private onTouchEnd = (e: TouchEvent): void => {
+    if (this.draw) {
+      const d = this.draw;
+      this.draw = null;
+      d.el.remove();
+      const fitScale = d.w / this.pageW;
+      const x = Math.min(d.x0, d.x);
+      const y = Math.min(d.y0, d.y);
+      const rw = Math.abs(d.x - d.x0);
+      const rh = Math.abs(d.y - d.y0);
+      if (rw > 6 && rh > 6 && fitScale > 0) {
+        this.emit({
+          type: "draw-rect",
+          page: d.pageIndex,
+          mode: this.drawMode,
+          rect: { x: x / fitScale, y: y / fitScale, w: rw / fitScale, h: rh / fitScale },
+        });
+      }
+      this.drawMode = null;
+      this.root.classList.remove("drawing");
+      return;
+    }
     if (this.pinch.active) {
       if (e.touches.length >= 2) return;
       this.pinch.active = false;
@@ -544,6 +620,51 @@ export class Viewer {
     const w = this.cssW();
     for (const v of this.views) this.layoutMasks(v, w);
     this.emitReveal();
+  }
+
+  // ---- manual mask editing ----
+  setEditMode(on: boolean): void {
+    this.editMode = on;
+    if (on) {
+      // Edit masks must be visible + tappable regardless of the red mode.
+      this.root.classList.remove("sheet-off", "manual");
+    } else {
+      this.drawMode = null;
+      this.root.classList.remove("drawing");
+      this.applySheetClass(); // restore sheet-off / manual per the current state
+    }
+    this.root.classList.toggle("editing", on);
+    const w = this.cssW();
+    for (const v of this.views) this.layoutMasks(v, w);
+  }
+
+  /** Replace the displayed cards — used to push the staged add/delete set while editing. */
+  setEditCards(cards: ViewerCard[]): void {
+    this.byPage = new Map();
+    for (const c of cards) {
+      const arr = this.byPage.get(c.pageIndex) ?? [];
+      arr.push(c);
+      this.byPage.set(c.pageIndex, arr);
+    }
+    const w = this.cssW();
+    for (let i = 0; i < this.views.length; i++) {
+      this.views[i].cards = this.byPage.get(i) ?? [];
+      this.layoutMasks(this.views[i], w);
+    }
+  }
+
+  setDrawMode(mode: "add" | "delete" | null): void {
+    this.drawMode = mode;
+    this.root.classList.toggle("drawing", mode != null);
+  }
+
+  private positionDraw(): void {
+    const d = this.draw;
+    if (!d) return;
+    d.el.style.left = `${Math.min(d.x0, d.x)}px`;
+    d.el.style.top = `${Math.min(d.y0, d.y)}px`;
+    d.el.style.width = `${Math.abs(d.x - d.x0)}px`;
+    d.el.style.height = `${Math.abs(d.y - d.y0)}px`;
   }
 
   private applySheetClass(): void {

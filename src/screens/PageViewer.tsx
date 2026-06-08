@@ -14,11 +14,18 @@ import {
 } from "react-native";
 import { useApp } from "../store/session";
 import { ensureEngine, stageJson } from "../engine/setupEngine";
-import { ViewerWebView, type ViewerHandle, type ViewerOpenArgs } from "../engine/ViewerWebView";
+import {
+  ViewerWebView,
+  type ViewerEditCard,
+  type ViewerHandle,
+  type ViewerOpenArgs,
+} from "../engine/ViewerWebView";
 import {
   addBookmark,
+  addCard,
   deckCards,
   deleteBookmark,
+  deleteCard,
   firstAnswerPage,
   getDeck,
   getDeckPdf,
@@ -29,6 +36,7 @@ import {
   updateDeck,
 } from "../db/repo";
 import type { BookmarkRow, CardRow, ReadMode } from "../db/rows";
+import type { Rect } from "../types";
 import { getProgress, idToken, putProgress } from "../sync/api";
 import { deckBookId } from "../sync/deck";
 import { colors } from "../ui/theme";
@@ -58,6 +66,11 @@ function cardKeyMaps(cards: CardRow[]) {
   return { idToKey, keyToId };
 }
 
+/** Do two page-coordinate rects overlap? (used by 範囲一括削除). */
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
 function Tool({ label, on, onPress }: { label: string; on?: boolean; onPress: () => void }) {
   return (
     <Pressable style={[styles.tool, on && styles.toolOn]} onPress={onPress} hitSlop={6}>
@@ -79,6 +92,15 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [zoom, setZoom] = useState(1);
   const [redMode, setRedMode] = useState<"mask" | "sheet" | "off">("mask");
   const [err, setErr] = useState<string | null>(null);
+  // Manual mask editing (staged buffer; saved/cancelled explicitly, like the web version).
+  type EditAdd = { tempId: number; pageIndex: number; rect: Rect };
+  const [editMode, setEditMode] = useState(false);
+  const [drawMode, setDrawMode] = useState<"add" | "delete" | null>(null);
+  const [editAdds, setEditAdds] = useState<EditAdd[]>([]);
+  const [editDels, setEditDels] = useState<Set<number>>(new Set());
+  const [editHistory, setEditHistory] = useState<{ adds: EditAdd[]; dels: Set<number> }[]>([]);
+  const tempIdRef = useRef(-1);
+  const pdfIdRef = useRef(0);
   const [bmOpen, setBmOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,6 +134,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
           setErr("デッキが見つかりません");
           return;
         }
+        pdfIdRef.current = pdf.id;
         let startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
         let startMode: ReadMode = deck.lastMode ?? "scroll";
         // Restore the red overlay (mode + reveals + band) from last session.
@@ -310,6 +333,116 @@ export function PageViewer({ deckId }: { deckId: number }) {
     setView({ name: "decks" });
   }, [deckId, page, mode, setView]);
 
+  // ---- manual mask editing ----
+  const editDirty = editAdds.length > 0 || editDels.size > 0;
+  const buildStaged = useCallback((adds: EditAdd[], dels: Set<number>): ViewerEditCard[] => {
+    const out: ViewerEditCard[] = [];
+    for (const c of cardsRef.current)
+      if (!dels.has(c.id)) out.push({ id: c.id, pageIndex: c.pageIndex, rects: c.rects });
+    for (const a of adds) out.push({ id: a.tempId, pageIndex: a.pageIndex, rects: [a.rect] });
+    return out;
+  }, []);
+  const applyEdit = useCallback(
+    (adds: EditAdd[], dels: Set<number>) => {
+      setEditHistory((h) => [...h, { adds: editAdds, dels: editDels }]);
+      setEditAdds(adds);
+      setEditDels(dels);
+      ref.current?.setEditCards(buildStaged(adds, dels)); // reflect immediately in the viewer
+    },
+    [editAdds, editDels, buildStaged],
+  );
+  const undoEdit = useCallback(() => {
+    if (editHistory.length === 0) return;
+    const prev = editHistory[editHistory.length - 1];
+    setEditAdds(prev.adds);
+    setEditDels(prev.dels);
+    setEditHistory(editHistory.slice(0, -1));
+    ref.current?.setEditCards(buildStaged(prev.adds, prev.dels));
+  }, [editHistory, buildStaged]);
+  const onMaskTapped = useCallback(
+    (id: number) => {
+      if (id < 0) applyEdit(editAdds.filter((a) => a.tempId !== id), editDels);
+      else applyEdit(editAdds, new Set(editDels).add(id));
+    },
+    [applyEdit, editAdds, editDels],
+  );
+  const onDrawRect = useCallback(
+    (pg: number, m: "add" | "delete", rect: Rect) => {
+      if (m === "delete") {
+        const dels = new Set(editDels);
+        for (const c of cardsRef.current) {
+          const rs = c.rects.length ? c.rects : [c.answerRect];
+          if (!dels.has(c.id) && rs.some((r) => rectsOverlap(r, rect))) dels.add(c.id);
+        }
+        const adds = editAdds.filter((a) => !(a.pageIndex === pg && rectsOverlap(a.rect, rect)));
+        applyEdit(adds, dels);
+      } else {
+        applyEdit([...editAdds, { tempId: tempIdRef.current--, pageIndex: pg, rect }], editDels);
+      }
+      setDrawMode(null); // the viewer auto-disarms after a draw; mirror that here
+    },
+    [applyEdit, editAdds, editDels],
+  );
+  const pickDraw = useCallback(
+    (m: "add" | "delete") => {
+      const next = drawMode === m ? null : m;
+      setDrawMode(next);
+      ref.current?.setDrawMode(next);
+    },
+    [drawMode],
+  );
+  const discardEdits = useCallback(() => {
+    setEditAdds([]);
+    setEditDels(new Set());
+    setEditHistory([]);
+    setDrawMode(null);
+  }, []);
+  const restoreAfterEdit = useCallback(() => {
+    ref.current?.setEditMode(false);
+    ref.current?.setEditCards(
+      cardsRef.current.map((c) => ({ id: c.id, pageIndex: c.pageIndex, rects: c.rects })),
+    );
+    ref.current?.setManualSheet(redMode === "sheet" && mode === "scroll"); // restore the band
+  }, [redMode, mode]);
+  const enterEdit = useCallback(() => {
+    discardEdits();
+    setEditMode(true);
+    ref.current?.setManualSheet(false); // hide the band while editing
+    ref.current?.setEditMode(true);
+    ref.current?.setEditCards(buildStaged([], new Set()));
+  }, [discardEdits, buildStaged]);
+  const cancelEdit = useCallback(() => {
+    discardEdits();
+    setEditMode(false);
+    restoreAfterEdit();
+  }, [discardEdits, restoreAfterEdit]);
+  const saveEdit = useCallback(async () => {
+    for (const id of editDels) await deleteCard(id);
+    for (const a of editAdds) await addCard(deckId, pdfIdRef.current, a.pageIndex, a.rect);
+    cardsRef.current = await deckCards(deckId); // refresh base set (also feeds reveal keys)
+    discardEdits();
+    setEditMode(false);
+    restoreAfterEdit();
+  }, [editAdds, editDels, deckId, discardEdits, restoreAfterEdit]);
+  const tryBack = useCallback(() => {
+    if (editMode && editDirty) {
+      Alert.alert("編集を破棄しますか？", "保存していない編集があります。", [
+        { text: "編集に戻る", style: "cancel" },
+        {
+          text: "破棄して終了",
+          style: "destructive",
+          onPress: () => {
+            discardEdits();
+            setEditMode(false);
+            back();
+          },
+        },
+      ]);
+      return;
+    }
+    back();
+  }, [editMode, editDirty, discardEdits, back]);
+
   const openBookmarks = useCallback(async () => {
     setBookmarks(await listBookmarks(deckId));
     setBmOpen(true);
@@ -372,7 +505,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
   return (
     <View style={styles.c}>
       <View style={styles.top}>
-        <Pressable onPress={back} hitSlop={10}>
+        <Pressable onPress={tryBack} hitSlop={10}>
           <Text style={styles.topBtn}>← 本棚</Text>
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>
@@ -403,6 +536,8 @@ export function PageViewer({ deckId }: { deckId: number }) {
               revealStateRef.current.band = { top, height };
               saveViewerState();
             }}
+            onMaskTapped={onMaskTapped}
+            onDrawRect={onDrawRect}
             onError={(m) => setErr(m)}
           />
         ) : (
@@ -457,14 +592,33 @@ export function PageViewer({ deckId }: { deckId: number }) {
           </View>
         </View>
 
-        <View style={styles.toolRow}>
-          <Tool label="赤マスク" on={redMode === "mask"} onPress={selectMask} />
-          {mode === "scroll" && (
-            <Tool label="赤シート" on={redMode === "sheet"} onPress={selectSheet} />
-          )}
-          <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
-          <Tool label="目次" onPress={openBookmarks} />
-        </View>
+        {editMode ? (
+          <View style={styles.toolRow}>
+            <Tool
+              label={drawMode === "add" ? "囲んで…" : "＋追加"}
+              on={drawMode === "add"}
+              onPress={() => pickDraw("add")}
+            />
+            <Tool
+              label={drawMode === "delete" ? "囲んで…" : "範囲削除"}
+              on={drawMode === "delete"}
+              onPress={() => pickDraw("delete")}
+            />
+            <Tool label="↶戻す" onPress={undoEdit} />
+            <Tool label="キャンセル" onPress={cancelEdit} />
+            <Tool label="保存" on onPress={() => void saveEdit()} />
+          </View>
+        ) : (
+          <View style={styles.toolRow}>
+            <Tool label="赤マスク" on={redMode === "mask"} onPress={selectMask} />
+            {mode === "scroll" && (
+              <Tool label="赤シート" on={redMode === "sheet"} onPress={selectSheet} />
+            )}
+            <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
+            <Tool label="目次" onPress={openBookmarks} />
+            <Tool label="編集" onPress={enterEdit} />
+          </View>
+        )}
       </View>
 
       <Modal visible={bmOpen} animationType="slide" onRequestClose={() => setBmOpen(false)}>

@@ -167,6 +167,27 @@ export async function answerCount(deckId: number): Promise<number> {
   return r?.n ?? 0;
 }
 
+/** Add a manual answer mask on a page (user fixing a detection miss). Returns the new card id. */
+export async function addCard(
+  deckId: number,
+  pdfId: number,
+  pageIndex: number,
+  rect: Rect,
+): Promise<number> {
+  const db = await getDb();
+  const r = await db.runAsync(
+    "INSERT INTO cards (deckId, pdfId, pageIndex, rects, answerRect, text, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [deckId, pdfId, pageIndex, JSON.stringify([rect]), JSON.stringify(rect), "", Date.now()],
+  );
+  return r.lastInsertRowId;
+}
+
+/** Remove a single answer mask (user fixing a false positive). */
+export async function deleteCard(cardId: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("DELETE FROM cards WHERE id = ?", [cardId]);
+}
+
 export interface DeckPatch {
   name?: string;
   color?: DeckColorConfig;

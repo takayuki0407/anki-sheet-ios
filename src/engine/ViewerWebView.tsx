@@ -6,6 +6,14 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 
 import { StyleSheet, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import { documentDirUri } from "./setupEngine";
+import type { Rect } from "../types";
+
+/** A card the viewer should display while editing (id<0 = a staged, not-yet-saved add). */
+export interface ViewerEditCard {
+  id: number;
+  pageIndex: number;
+  rects: Rect[];
+}
 
 export interface ViewerOpenArgs {
   url: string;
@@ -32,6 +40,9 @@ export interface ViewerHandle {
   setZoom(zoom: number): void;
   setSheet(on: boolean): void;
   setManualSheet(on: boolean): void;
+  setEditMode(on: boolean): void;
+  setEditCards(cards: ViewerEditCard[]): void;
+  setDrawMode(mode: "add" | "delete" | null): void;
 }
 
 interface Props {
@@ -42,11 +53,24 @@ interface Props {
   onZoomChanged?: (zoom: number) => void;
   onRevealChanged?: (revealed: number[], sheetOn: boolean) => void;
   onBandChanged?: (top: number, height: number) => void;
+  onMaskTapped?: (id: number) => void;
+  onDrawRect?: (page: number, mode: "add" | "delete", rect: Rect) => void;
   onError?: (msg: string) => void;
 }
 
 export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebView(
-  { engineUri, open, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onBandChanged, onError },
+  {
+    engineUri,
+    open,
+    onBookReady,
+    onPageChanged,
+    onZoomChanged,
+    onRevealChanged,
+    onBandChanged,
+    onMaskTapped,
+    onDrawRect,
+    onError,
+  },
   ref,
 ) {
   const webRef = useRef<WebView>(null);
@@ -80,6 +104,9 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
       setZoom: (zoom) => dispatch({ cmd: "setZoom", reqId: "c", zoom }),
       setSheet: (on) => dispatch({ cmd: "setSheet", reqId: "c", on }),
       setManualSheet: (on) => dispatch({ cmd: "setManualSheet", reqId: "c", on }),
+      setEditMode: (on) => dispatch({ cmd: "setEditMode", reqId: "c", editOn: on }),
+      setEditCards: (cards) => dispatch({ cmd: "setEditCards", reqId: "c", editCards: cards }),
+      setDrawMode: (mode) => dispatch({ cmd: "setDrawMode", reqId: "c", drawMode: mode }),
     }),
     [dispatch],
   );
@@ -96,6 +123,9 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         sheetOn?: boolean;
         top?: number;
         height?: number;
+        id?: number;
+        mode?: "add" | "delete";
+        rect?: Rect;
       };
       try {
         m = JSON.parse(e.nativeEvent.data);
@@ -123,12 +153,29 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
           if (typeof m.top === "number" && typeof m.height === "number")
             onBandChanged?.(m.top, m.height);
           break;
+        case "mask-tapped":
+          if (typeof m.id === "number") onMaskTapped?.(m.id);
+          break;
+        case "draw-rect":
+          if (typeof m.page === "number" && m.rect && (m.mode === "add" || m.mode === "delete"))
+            onDrawRect?.(m.page, m.mode, m.rect);
+          break;
         case "error":
           onError?.(String(m.message ?? "engine error"));
           break;
       }
     },
-    [sendOpen, onBookReady, onPageChanged, onZoomChanged, onRevealChanged, onBandChanged, onError],
+    [
+      sendOpen,
+      onBookReady,
+      onPageChanged,
+      onZoomChanged,
+      onRevealChanged,
+      onBandChanged,
+      onMaskTapped,
+      onDrawRect,
+      onError,
+    ],
   );
 
   return (

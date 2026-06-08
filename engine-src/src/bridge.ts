@@ -20,7 +20,7 @@ import {
 } from "./pdf/pdfEngine";
 import { DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "./types";
 import { blobToDataURL, pdfBytes } from "./io";
-import { Viewer, type FitMode, type OpenBookArgs, type ViewMode } from "./viewer/viewer";
+import { Viewer, type FitMode, type OpenBookArgs, type ViewerCard, type ViewMode } from "./viewer/viewer";
 
 interface HostBridge {
   postMessage(data: string): void;
@@ -59,6 +59,10 @@ interface Cmd {
   fit?: FitMode;
   zoom?: number;
   on?: boolean;
+  // mask editing
+  editOn?: boolean;
+  editCards?: ViewerCard[];
+  drawMode?: "add" | "delete" | null;
 }
 
 const aborters = new Map<string, AbortController>();
@@ -184,6 +188,9 @@ const handlers: Record<string, (m: Cmd) => void> = {
   setManualSheet: (m) => {
     if (typeof m.on === "boolean") getViewer().setManualSheet(m.on);
   },
+  setEditMode: (m) => getViewer().setEditMode(!!m.editOn),
+  setEditCards: (m) => getViewer().setEditCards(m.editCards ?? []),
+  setDrawMode: (m) => getViewer().setDrawMode(m.drawMode ?? null),
 };
 
 interface Engine {
