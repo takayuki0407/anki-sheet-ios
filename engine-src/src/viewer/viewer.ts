@@ -82,7 +82,7 @@ export class Viewer {
   // of straight up/down) ignores horizontal — scrollLeft is pinned to its gesture-start value so a
   // careless vertical flick doesn't drift sideways. Diagonal/horizontal swipes follow the finger.
   private glock = { x: 0, y: 0, lastX: 0, axis: "none" as "none" | "vlock" | "free" };
-  private static readonly VLOCK_TAN = 0.36; // tan(20°) ≈ 0.364: |dx| < |dy|*0.36 → near-vertical
+  private static readonly VLOCK_TAN = 1.0; // tan(45°)=1: |dx| < |dy| → vertical-dominant → lock
   private contentEl: HTMLElement | null = null;
   // Manual red sheet (縦読み): a draggable / resizable band fixed over the viewport.
   private manualSheetEl: HTMLElement | null = null;
@@ -460,8 +460,8 @@ export class Viewer {
   }
 
   // Soft axis lock. Vertical is native (touch-action: pan-y); horizontal is NEVER native, so we
-  // drive it here ONLY for a clearly diagonal/horizontal swipe. A near-vertical swipe (≤~20° tilt)
-  // gets no horizontal at all — there is nothing to fight or snap back, so vertical stays smooth.
+  // drive it here ONLY for a horizontal-dominant swipe (>45° from vertical). A vertical-dominant
+  // swipe gets no horizontal at all — nothing to fight or snap back, so vertical stays smooth.
   // Passive (no preventDefault): scrollLeft is independent of the native vertical scroller.
   private onMove = (e: TouchEvent): void => {
     if (this.drawMode || this.pinch.active || e.touches.length !== 1) return;
@@ -470,7 +470,7 @@ export class Viewer {
       const dx = t.clientX - this.glock.x;
       const dy = t.clientY - this.glock.y;
       if (Math.hypot(dx, dy) < 10) return; // wait until the swipe direction is clear
-      // Within ~20° of vertical → lock out horizontal (vlock); otherwise follow the finger (free).
+      // Vertical-dominant (within 45° of vertical) → lock out horizontal; else follow finger (free).
       this.glock.axis = Math.abs(dx) < Math.abs(dy) * Viewer.VLOCK_TAN ? "vlock" : "free";
     }
     if (this.glock.axis === "free") this.root.scrollLeft -= t.clientX - this.glock.lastX;
