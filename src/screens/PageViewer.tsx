@@ -119,6 +119,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const cardsRef = useRef<CardRow[]>([]);
   const progressAtRef = useRef(0);
   const pmRef = useRef<{ page: number; mode: ReadMode }>({ page: 0, mode: "scroll" });
+  const starredRef = useRef<number[]>([]); // latest starred ids for the debounced progress push
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -189,11 +190,15 @@ export function PageViewer({ deckId }: { deckId: number }) {
             if (c.lastMode) startMode = c.lastMode;
             if (c.redMode) savedMode = c.redMode;
             if (c.sheetBand) savedBand = c.sheetBand;
-            if (c.revealedKeys) {
+            if (c.revealedKeys || c.starredKeys) {
               const { keyToId } = cardKeyMaps(cards);
-              savedRevealed = c.revealedKeys
-                .map((k) => keyToId.get(k))
-                .filter((x): x is number => x != null);
+              const toIds = (keys: string[]) =>
+                keys.map((k) => keyToId.get(k)).filter((x): x is number => x != null);
+              if (c.revealedKeys) savedRevealed = toIds(c.revealedKeys);
+              if (c.starredKeys) {
+                savedStarred = toIds(c.starredKeys);
+                void setMeta(`star:${deckId}`, JSON.stringify(savedStarred));
+              }
             }
             progressAtRef.current = cloud.updatedAt;
             void updateDeck(deckId, { lastPage: startPage, lastMode: startMode });
@@ -215,6 +220,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
         setMode(startMode);
         setRedMode(savedMode);
         setStarred(new Set(savedStarred));
+        starredRef.current = savedStarred;
         setPageCount(pdf.pageCount);
         setEngineUri(uri);
         setOpenArgs({
@@ -253,9 +259,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
     pushTimer.current = setTimeout(async () => {
       if (!(await idToken())) return;
       const { idToKey } = cardKeyMaps(cardsRef.current);
-      const revealedKeys = revealStateRef.current.revealed
-        .map((i) => idToKey.get(i))
-        .filter((x): x is string => !!x);
+      const toKeys = (ids: number[]) => ids.map((i) => idToKey.get(i)).filter((x): x is string => !!x);
       const at = Date.now();
       progressAtRef.current = at;
       void setMeta(`progressAt:${deckId}`, String(at));
@@ -264,7 +268,8 @@ export function PageViewer({ deckId }: { deckId: number }) {
         lastMode: pmRef.current.mode,
         redMode: revealStateRef.current.redMode,
         sheetBand: revealStateRef.current.band,
-        revealedKeys,
+        revealedKeys: toKeys(revealStateRef.current.revealed),
+        starredKeys: toKeys(starredRef.current),
       }).catch(() => {});
     }, 1600);
   }, [deckId]);
@@ -339,15 +344,16 @@ export function PageViewer({ deckId }: { deckId: number }) {
       void (async () => {
         if (!(await idToken())) return;
         const { idToKey } = cardKeyMaps(cardsRef.current);
+        const toKeys = (ids: number[]) =>
+          ids.map((i) => idToKey.get(i)).filter((x): x is string => !!x);
         void setMeta(`progressAt:${deckId}`, String(Date.now()));
         void putProgress(bookIdRef.current!, {
           lastPage: page,
           lastMode: mode,
           redMode: revealStateRef.current.redMode,
           sheetBand: revealStateRef.current.band,
-          revealedKeys: revealStateRef.current.revealed
-            .map((i) => idToKey.get(i))
-            .filter((x): x is string => !!x),
+          revealedKeys: toKeys(revealStateRef.current.revealed),
+          starredKeys: toKeys(starredRef.current),
         }).catch(() => {});
       })();
     }
@@ -474,9 +480,11 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const onMaskStarred = useCallback(
     (_id: number, all: number[]) => {
       setStarred(new Set(all));
+      starredRef.current = all;
       void setMeta(`star:${deckId}`, JSON.stringify(all));
+      pushProgress(); // sync ★ cross-device (portable keys, last-write-wins)
     },
-    [deckId],
+    [deckId, pushProgress],
   );
   const toggleStarReview = useCallback(() => {
     const next = !starMode;

@@ -132,6 +132,8 @@ export interface ProgressData {
   redMode?: "mask" | "sheet" | "off";
   sheetBand?: { top: number; height: number };
   revealedKeys?: string[];
+  /** Starred answers as portable keys (★ review) — synced cross-device like revealedKeys. */
+  starredKeys?: string[];
 }
 
 export async function getProgress(
