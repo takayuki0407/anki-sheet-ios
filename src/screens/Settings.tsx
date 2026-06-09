@@ -70,6 +70,7 @@ export function Settings({ deckId }: { deckId: number }) {
   const [preview, setPreview] = useState<{ dataUrl: string; count: number } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [redetecting, setRedetecting] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,6 +125,25 @@ export function Settings({ deckId }: { deckId: number }) {
     if (p) setColor((c) => ({ ...c, hueTarget: p.hueTarget, hueTol: p.hueTol }));
   };
   const patch = (p: Partial<DeckColorConfig>) => setColor((c) => ({ ...c, ...p }));
+
+  // Auto-detect the answer color (same probe the import flow uses), then update the live preview.
+  // The manual presets/sliders stay available to fine-tune afterward.
+  const runAutoColor = useCallback(async () => {
+    if (!url) return;
+    try {
+      setAutoBusy(true);
+      setProgress("自動検出中…");
+      const det = await engine.detectAll({ url, auto: true }, (pr) =>
+        setProgress(`自動検出 ${pr.page}/${pr.total} …`),
+      );
+      if (det.color) setColor(det.color);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAutoBusy(false);
+      setProgress("");
+    }
+  }, [url, engine]);
 
   const redetect = useCallback(async () => {
     if (!url) return;
@@ -209,7 +229,17 @@ export function Settings({ deckId }: { deckId: number }) {
         <Text style={styles.label}>本の名前</Text>
         <TextInput style={styles.input} value={name} onChangeText={setName} />
 
-        <Text style={styles.label}>答えの色（プリセット）</Text>
+        <Text style={styles.label}>答えの色</Text>
+        <Pressable
+          style={[styles.chip, styles.chipOn, autoBusy && styles.disabled]}
+          onPress={runAutoColor}
+          disabled={autoBusy || redetecting}
+        >
+          <Text style={[styles.chipText, styles.chipTextOn]}>
+            {autoBusy ? "自動検出中…" : "自動検出（おまかせ）"}
+          </Text>
+        </Pressable>
+        <Text style={styles.label}>プリセット</Text>
         <View style={styles.presets}>
           {COLOR_PRESETS.map((p) => (
             <Pressable
