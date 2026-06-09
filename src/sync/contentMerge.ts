@@ -59,6 +59,35 @@ export function activeClozes(b: ContentBlob): ClozeEntry[] {
   return Object.values(m).filter((e) => !e.d);
 }
 
+/** The tombstone set (deleted cloze key -> delete time) of a map — what the client persists locally. */
+export function tombstonesOf(map: ClozeMap): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, e] of Object.entries(map)) if (e.d) out[k] = e.t;
+  return out;
+}
+
+/** Build the element-set from the LIVE cards (each carries its own t = card.createdAt) plus the
+ * persisted tombstones. This is how a client derives what to upload. */
+export function clozeMapFromCards(
+  cards: readonly { pageIndex: number; rects: Rect[]; bbox: Rect; text?: string; t: number }[],
+  tomb: Record<string, number>,
+): ClozeMap {
+  const map: ClozeMap = {};
+  for (const c of cards) {
+    const k = clozeKey(c.pageIndex, c.bbox);
+    if (!map[k] || map[k].t < c.t)
+      map[k] = { t: c.t, pageIndex: c.pageIndex, rects: c.rects, bbox: c.bbox, text: c.text };
+  }
+  for (const [k, t] of Object.entries(tomb)) {
+    const prev = map[k];
+    if (!prev || prev.t < t)
+      map[k] = prev
+        ? { ...prev, t, d: 1 }
+        : { t, d: 1, pageIndex: 0, rects: [], bbox: { x: 0, y: 0, w: 0, h: 0 } };
+  }
+  return map;
+}
+
 /** Fold a legacy clozes[] array into the map when no map exists yet (old client / GET mirror is
  * ignored once a map is present, so it can't resurrect a tombstone). */
 export function normalizeContent(b: ContentBlob, baseline: number): ContentBlob {

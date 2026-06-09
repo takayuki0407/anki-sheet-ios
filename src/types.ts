@@ -43,6 +43,9 @@ export interface DetectedCloze {
   bbox: Rect;
   /** Recovered answer text when available (pdf.js + cMaps); may be empty. */
   text: string;
+  /** Cloze LWW timestamp (P0-2). Set on sync-materialize to PRESERVE the merged `t`; for a fresh
+   * manual add / re-detect it's absent and the card's createdAt is stamped "now" instead. */
+  t?: number;
 }
 
 // ---- Dexie row types (all dates are epoch-ms numbers) ----

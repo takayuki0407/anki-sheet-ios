@@ -7,6 +7,7 @@ import { File, Paths } from "expo-file-system";
 import { deckPdfFile } from "../db/files";
 import {
   deckCards,
+  getClozeTomb,
   getDeck,
   getDeckPdf,
   getMeta,
@@ -14,7 +15,7 @@ import {
   importDeck,
   listBookmarks,
   listDecks,
-  redetectDeck,
+  materializeContent,
   setMeta,
   updateDeck,
 } from "../db/repo";
@@ -29,6 +30,14 @@ import {
   updateBookMeta,
   type AccountBook,
 } from "./api";
+import {
+  activeClozes,
+  clozeMapFromCards,
+  mergeContent,
+  normalizeContent,
+  tombstonesOf,
+  type ClozeMap,
+} from "./contentMerge";
 import { deviceLabel } from "./device";
 import type { DeckColorConfig, DetectedCloze } from "../types";
 
@@ -67,7 +76,10 @@ interface DeckContent {
   pageCount: number;
   pageW: number;
   pageH: number;
+  /** Legacy whole-set (GET compat mirror + old-client download). Live source = clozesLww. */
   clozes: DetectedCloze[];
+  /** Masks as an LWW-element-set so concurrent edits merge per-key (P0-2). */
+  clozesLww?: ClozeMap;
   bookmarks: { title: string; pageIndex: number }[];
   /** Local edit time of this content (epoch ms), set on upload — drives content last-write-wins. */
   contentAt?: number;
@@ -166,13 +178,31 @@ async function buildContent(deckId: number): Promise<DeckContent | null> {
     listBookmarks(deckId),
   ]);
   if (!deck || !pdf) return null;
+  // Masks as the LWW-element-set: live cards (t = createdAt) + persisted tombstones (P0-2). Also emit
+  // the active clozes[] mirror for the GET shim / old-client download.
+  const clozesLww = clozeMapFromCards(
+    cards.map((c) => ({
+      pageIndex: c.pageIndex,
+      rects: c.rects,
+      bbox: c.answerRect,
+      text: c.text,
+      t: c.createdAt,
+    })),
+    await getClozeTomb(deckId),
+  );
   return {
     name: deck.name,
     color: deck.color,
     pageCount: pdf.pageCount,
     pageW: pdf.pageW,
     pageH: pdf.pageH,
-    clozes: cards.map((c) => ({ pageIndex: c.pageIndex, rects: c.rects, bbox: c.answerRect, text: c.text })),
+    clozes: activeClozes({ clozesLww }).map((e) => ({
+      pageIndex: e.pageIndex,
+      rects: e.rects,
+      bbox: e.bbox,
+      text: e.text ?? "",
+    })),
+    clozesLww,
     bookmarks: bms.map((b) => ({ title: b.title, pageIndex: b.pageIndex })),
   };
 }
@@ -213,11 +243,48 @@ export async function refreshContent(deckId: number): Promise<boolean> {
   const bookId = await deckBookId(deckId);
   if (!bookId || !(await idToken())) return false; // not a synced deck / signed out
   const localAt = Number(await getMeta(contentKey(deckId))) || 0;
-  const content = (await getContent(bookId)) as DeckContent;
-  const cloudAt = content.contentAt ?? 0;
+  const cloud = (await getContent(bookId)) as DeckContent;
+  const cloudAt = cloud.contentAt ?? 0;
   if (!cloudAt || cloudAt <= localAt) return false; // local already current
-  await redetectDeck(deckId, content.color, content.clozes); // replace cards (+ color), transactional
-  if (content.name) await updateDeck(deckId, { name: content.name });
+  // MERGE the (already server-merged) cloud set with our LOCAL set per-key, then materialize cards
+  // from the result (preserving each cloze's t) and adopt the merged tombstones (P0-2).
+  const [deck, cards, tomb] = await Promise.all([
+    getDeck(deckId),
+    deckCards(deckId),
+    getClozeTomb(deckId),
+  ]);
+  if (!deck) return false;
+  const localMap = clozeMapFromCards(
+    cards.map((c) => ({
+      pageIndex: c.pageIndex,
+      rects: c.rects,
+      bbox: c.answerRect,
+      text: c.text,
+      t: c.createdAt,
+    })),
+    tomb,
+  );
+  const merged = mergeContent(
+    normalizeContent(
+      { clozesLww: localMap, name: deck.name, color: deck.color, contentAt: localAt },
+      1,
+    ),
+    normalizeContent(cloud, cloudAt),
+  );
+  const active = activeClozes(merged).map((e) => ({
+    pageIndex: e.pageIndex,
+    rects: e.rects,
+    bbox: e.bbox,
+    text: e.text ?? "",
+    t: e.t,
+  }));
+  await materializeContent(
+    deckId,
+    (merged.color ?? deck.color) as DeckColorConfig,
+    active,
+    tombstonesOf(merged.clozesLww ?? {}),
+  );
+  if (merged.name) await updateDeck(deckId, { name: merged.name });
   await setMeta(contentKey(deckId), String(cloudAt));
   return true;
 }
@@ -262,6 +329,8 @@ export async function downloadDeck(book: AccountBook): Promise<number> {
   });
   await setMeta(bookKey(deckId), book.book_id);
   await setMeta(contentKey(deckId), String(content.contentAt ?? 0)); // baseline so we don't re-pull it
+  // Adopt any cloud tombstones so a mask deleted elsewhere isn't re-added locally later (P0-2).
+  await setMeta(`clozeTomb:${deckId}`, JSON.stringify(tombstonesOf(content.clozesLww ?? {})));
   if (content.bookmarks?.length) await importBookmarks(deckId, content.bookmarks);
   return deckId;
 }

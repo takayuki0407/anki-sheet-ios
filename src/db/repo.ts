@@ -95,7 +95,8 @@ async function insertCards(
         JSON.stringify(c.rects),
         JSON.stringify(c.bbox),
         c.text,
-        now,
+        // createdAt doubles as the cloze LWW timestamp (P0-2): sync-materialize passes the merged t.
+        c.t ?? now,
       );
     }
     await db.runAsync(
@@ -221,9 +222,8 @@ export async function updateDeck(deckId: number, patch: DeckPatch): Promise<void
   await db.runAsync(`UPDATE decks SET ${sets.join(", ")} WHERE id = ?`, params);
 }
 
-/** Re-run detection for a deck under a new color config: replace all its answers. Re-detection makes
- * NEW card ids (and may change which/where answers are), so ★・revealed (stored as local card ids)
- * are carried over to the replaced cards by geometric overlap; unmatched answers are dropped (§4.4). */
+/** Re-run detection for a deck under a new color config: replace all its answers (carrying ★ over),
+ * and tombstone the masks the re-detect removed so the deletion propagates cross-device (P0-2/§4.4). */
 export async function redetectDeck(
   deckId: number,
   color: DeckColorConfig,
@@ -247,8 +247,68 @@ export async function redetectDeck(
     });
     const newCards = await deckCards(deckId); // new ids after re-insert
     await carryStarsRevealedOnRedetect(deckId, oldCards, newCards, now);
+    await tombstoneRemovedClozes(deckId, oldCards, newCards, now); // removed masks -> tombstones
     return count;
   });
+}
+
+/** Materialize the server-MERGED mask set (P0-2): replace cards with the active clozes (preserving
+ * their merged `t` via cloze.t), carry ★ over, and adopt the merged tombstones. */
+export async function materializeContent(
+  deckId: number,
+  color: DeckColorConfig,
+  active: DetectedCloze[],
+  tombs: Record<string, number>,
+): Promise<void> {
+  await withWriteLock(async () => {
+    const db = await getDb();
+    const now = Date.now();
+    const oldCards = await deckCards(deckId);
+    await db.withTransactionAsync(async () => {
+      await db.runAsync("UPDATE decks SET color = ? WHERE id = ?", [JSON.stringify(color), deckId]);
+      const pdf = await db.getFirstAsync<{ id: number }>(
+        "SELECT id FROM pdfs WHERE deckId = ? LIMIT 1",
+        [deckId],
+      );
+      if (!pdf) throw new Error("PDFが見つかりません");
+      await db.runAsync("DELETE FROM cards WHERE deckId = ?", [deckId]);
+      await insertCards(db, deckId, pdf.id, active, now); // active carries t -> createdAt
+    });
+    const newCards = await deckCards(deckId);
+    await carryStarsRevealedOnRedetect(deckId, oldCards, newCards, now);
+    await setMeta(clozeTombKey(deckId), JSON.stringify(tombs));
+  });
+}
+
+const clozeTombKey = (deckId: number) => `clozeTomb:${deckId}`;
+
+/** Read the deck's mask tombstone store (clozeKey -> delete time). */
+export async function getClozeTomb(deckId: number): Promise<Record<string, number>> {
+  const raw = await getMeta(clozeTombKey(deckId));
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return v && typeof v === "object" ? (v as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Tombstone masks present before a re-detect but gone after; clear tombstones for re-added ones. */
+async function tombstoneRemovedClozes(
+  deckId: number,
+  oldCards: CardRow[],
+  newCards: CardRow[],
+  now: number,
+): Promise<void> {
+  const newKeys = new Set(newCards.map((c) => cardKey(c.pageIndex, c.answerRect)));
+  const tomb = await getClozeTomb(deckId);
+  for (const c of oldCards) {
+    const k = cardKey(c.pageIndex, c.answerRect);
+    if (!newKeys.has(k)) tomb[k] = now;
+  }
+  for (const k of newKeys) delete tomb[k];
+  await setMeta(clozeTombKey(deckId), JSON.stringify(tomb));
 }
 
 /** After a re-detect replaces a deck's cards, move ★/revealed (local card ids, in meta) onto the new

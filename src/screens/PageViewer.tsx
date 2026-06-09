@@ -27,6 +27,7 @@ import {
   deleteBookmark,
   deleteCard,
   firstAnswerPage,
+  getClozeTomb,
   getDeck,
   getDeckPdf,
   getMeta,
@@ -51,7 +52,7 @@ import {
   removeBm as bmRemove,
 } from "../sync/progressMerge";
 import { deckBookId, refreshContent, uploadContent } from "../sync/deck";
-import { cardKeyMaps } from "../sync/cardKeys";
+import { cardKey, cardKeyMaps } from "../sync/cardKeys";
 import { colors } from "../ui/theme";
 
 type FitMode = "width" | "page";
@@ -493,8 +494,18 @@ export function PageViewer({ deckId }: { deckId: number }) {
     restoreAfterEdit();
   }, [discardEdits, restoreAfterEdit]);
   const saveEdit = useCallback(async () => {
-    for (const id of editDels) await deleteCard(id);
-    for (const a of editAdds) await addCard(deckId, pdfIdRef.current, a.pageIndex, a.rect);
+    const now = Date.now();
+    const tomb = await getClozeTomb(deckId);
+    for (const id of editDels) {
+      const c = cardsRef.current.find((x) => x.id === id);
+      if (c) tomb[cardKey(c.pageIndex, c.answerRect)] = now; // tombstone the deleted mask (P0-2)
+      await deleteCard(id);
+    }
+    for (const a of editAdds) {
+      delete tomb[cardKey(a.pageIndex, a.rect)]; // a re-added position is live again
+      await addCard(deckId, pdfIdRef.current, a.pageIndex, a.rect);
+    }
+    await setMeta(`clozeTomb:${deckId}`, JSON.stringify(tomb));
     cardsRef.current = await deckCards(deckId); // refresh base set (also feeds reveal keys)
     // Pro: re-sync content so the mask add/delete reaches other devices (best-effort; PDF unchanged).
     void (async () => {
