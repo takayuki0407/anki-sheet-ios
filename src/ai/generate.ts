@@ -55,6 +55,10 @@ export async function generatePage(opts: {
   density: Density;
   subjectHint?: string;
   regenerate?: boolean;
+  /** Reference-only excerpts of the neighbor pages (tail of p-1 / head of p+1), to resolve content
+   * split across a page boundary. Questions still come only from THIS page's marked terms. */
+  prevContext?: string;
+  nextContext?: string;
 }): Promise<{ questions: QuestionRow[]; remaining?: number; cached?: boolean }> {
   const res = await authedFetch("/generate", {
     method: "POST",
@@ -66,6 +70,8 @@ export async function generatePage(opts: {
       density: opts.density,
       subjectHint: opts.subjectHint ?? "",
       regenerate: !!opts.regenerate,
+      prevContext: opts.prevContext ?? "",
+      nextContext: opts.nextContext ?? "",
     }),
   });
   if (res.status === 402) {

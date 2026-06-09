@@ -1,7 +1,7 @@
 // 設定・再検出 — rename, tune the answer-color band with a live single-page preview
 // (the engine renders a sample page with the would-be answers masked), then re-detect the
 // whole PDF under the new config, or delete the deck.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -73,7 +73,6 @@ export function Settings({ deckId, from }: { deckId: number; from?: AppView }) {
   const [autoBusy, setAutoBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -98,27 +97,29 @@ export function Settings({ deckId, from }: { deckId: number; from?: AppView }) {
     };
   }, [deckId]);
 
-  // Live preview: re-render the sample page whenever the color config changes (debounced).
+  // Preview is ON DEMAND (the プレビュー button), NOT live on every color change: re-rasterizing the
+  // whole sample page each time the color moves stalls the UI. Color (presets/sliders/auto) applies to
+  // the config instantly; the button re-renders the masked preview when you want to check it.
+  const runPreview = useCallback(async () => {
+    if (!url || !engine.ready) return;
+    try {
+      setPreviewing(true);
+      const r = await engine.preview({ url, color, page: samplePage });
+      setPreview(r);
+    } catch {
+      /* preview is best-effort */
+    } finally {
+      setPreviewing(false);
+    }
+  }, [url, color, samplePage, engine]);
+
+  // Render it ONCE when the page first becomes available so there's something to look at; afterwards
+  // updates are user-driven. Intentionally not depending on `color` (that's what made it live/heavy).
   useEffect(() => {
     if (!url || !engine.ready) return;
-    let cancelled = false;
-    if (previewTimer.current) clearTimeout(previewTimer.current);
-    previewTimer.current = setTimeout(async () => {
-      try {
-        setPreviewing(true);
-        const r = await engine.preview({ url, color, page: samplePage });
-        if (!cancelled) setPreview(r);
-      } catch {
-        /* preview is best-effort */
-      } finally {
-        if (!cancelled) setPreviewing(false);
-      }
-    }, 350);
-    return () => {
-      cancelled = true; // ignore a slower-resolving preview from a superseded config
-      if (previewTimer.current) clearTimeout(previewTimer.current);
-    };
-  }, [url, color, samplePage, engine.ready, engine.preview]);
+    void runPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, engine.ready]);
 
   const applyPreset = (key: string) => {
     const p = COLOR_PRESETS.find((x) => x.key === key);
@@ -219,14 +220,25 @@ export function Settings({ deckId, from }: { deckId: number; from?: AppView }) {
             <Image source={{ uri: preview.dataUrl }} style={styles.preview} resizeMode="contain" />
           ) : (
             <View style={styles.previewPh}>
-              <ActivityIndicator color={colors.sand} />
+              {previewing ? (
+                <ActivityIndicator color={colors.sand} />
+              ) : (
+                <Text style={styles.muted}>「プレビュー」で表示</Text>
+              )}
             </View>
           )}
           <View style={styles.previewBar}>
             <Text style={styles.previewTxt}>
-              プレビュー: {preview ? `${preview.count} 件` : "…"}
+              プレビュー: {preview ? `${preview.count} 件` : "—"}
               {previewing ? "（更新中）" : ""}
             </Text>
+            <Pressable
+              style={[styles.previewBtn, (previewing || !url) && styles.disabled]}
+              onPress={() => void runPreview()}
+              disabled={previewing || !url}
+            >
+              <Text style={styles.previewBtnText}>{previewing ? "更新中…" : "プレビュー"}</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -342,8 +354,11 @@ const styles = StyleSheet.create({
   },
   preview: { width: "100%", height: 320, backgroundColor: "#525659" },
   previewPh: { height: 320, alignItems: "center", justifyContent: "center" },
-  previewBar: { padding: 8, backgroundColor: "rgba(0,0,0,0.35)" },
-  previewTxt: { color: "#fff", fontSize: 13, textAlign: "center" },
+  previewBar: { padding: 8, backgroundColor: "rgba(0,0,0,0.35)", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  previewTxt: { color: "#fff", fontSize: 13, flexShrink: 1 },
+  previewBtn: { backgroundColor: colors.sand, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8 },
+  previewBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  muted: { color: colors.muted, fontSize: 13 },
   label: { fontSize: 13, fontWeight: "600", color: colors.text, marginTop: 10 },
   input: {
     borderWidth: 1,

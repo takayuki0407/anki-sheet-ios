@@ -4,7 +4,6 @@
 // page budget (1 per newly-generated page).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -41,6 +40,55 @@ const DENSITIES: { key: Density; label: string }[] = [
   { key: "many", label: "多め" },
 ];
 
+// ---- page-thumbnail cache + concurrency limiter (module scope) --------------------------------
+// The 生成 grid shows a pdf.js thumbnail per page, but pdf.js serializes render() on ONE canvas, so
+// firing cover() for 200+ pages at mount stalls the whole list (every card stuck on a spinner — the
+// "ページが出ない" symptom). We (a) cache resolved data URIs per book+page across mounts/scrolls,
+// (b) fetch a row only once it scrolls into view, and (c) cap in-flight cover() calls so the visible
+// rows resolve fast. Card body (number/counts/checkbox) renders immediately, never blocked on a thumb.
+const thumbCache = new Map<string, string>();
+const thumbKey = (url: string, page: number) => `${url}#${page}`;
+const MAX_THUMB_INFLIGHT = 2;
+let thumbInFlight = 0;
+const thumbQueue: Array<() => void> = [];
+function pumpThumbs() {
+  while (thumbInFlight < MAX_THUMB_INFLIGHT && thumbQueue.length) thumbQueue.shift()!();
+}
+/** Resolve a page thumbnail via the cache + limiter; returns a cancel fn (drops it if still queued). */
+function loadThumb(
+  engine: ReturnType<typeof useDetectionEngine>,
+  url: string,
+  page: number,
+  onDone: (uri: string) => void,
+): () => void {
+  const key = thumbKey(url, page);
+  const cached = thumbCache.get(key);
+  if (cached) {
+    onDone(cached);
+    return () => {};
+  }
+  let cancelled = false;
+  thumbQueue.push(() => {
+    if (cancelled) return pumpThumbs(); // scrolled away before starting → drop it, free the slot
+    thumbInFlight++;
+    void engine
+      .cover({ url, page, maxWidth: 160 })
+      .then((u) => {
+        thumbCache.set(key, u);
+        if (!cancelled) onDone(u);
+      })
+      .catch(() => {})
+      .finally(() => {
+        thumbInFlight--;
+        pumpThumbs();
+      });
+  });
+  pumpThumbs();
+  return () => {
+    cancelled = true;
+  };
+}
+
 export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
   const setView = useApp((s) => s.setView);
   const user = useAccount((s) => s.user);
@@ -48,6 +96,7 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
 
   const [name, setName] = useState("");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState(0);
   const [bookId, setBookId] = useState<string | null>(null);
   const [termsByPage, setTermsByPage] = useState<Map<number, string[]>>(new Map());
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
@@ -73,6 +122,7 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
       if (!live) return;
       setName(d?.name ?? "");
       setPdfUrl(pdf?.filePath ?? null);
+      setPageCount(pdf?.pageCount ?? 0);
       setBookId(bid ?? null);
       // Register EVERY page that has an answer (memorization spot), pushing the recovered answer text
       // only when present. The page list keys off this map, so pages whose answers have no recovered
@@ -131,6 +181,7 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
         <GenerateTab
           bookId={bookId}
           pdfUrl={pdfUrl}
+          pageCount={pageCount}
           engine={engine}
           termsByPage={termsByPage}
           countsByPage={countsByPage}
@@ -159,6 +210,7 @@ function Tab({ label, on, onPress }: { label: string; on: boolean; onPress: () =
 function GenerateTab({
   bookId,
   pdfUrl,
+  pageCount,
   engine,
   termsByPage,
   countsByPage,
@@ -168,6 +220,7 @@ function GenerateTab({
 }: {
   bookId: string | null;
   pdfUrl: string | null;
+  pageCount: number;
   engine: ReturnType<typeof useDetectionEngine>;
   termsByPage: Map<number, string[]>;
   countsByPage: Map<number, number>;
@@ -182,6 +235,13 @@ function GenerateTab({
   const [to, setTo] = useState("");
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  // Which page rows are on-screen → only those request their (canvas-serialized) thumbnail. Refs keep
+  // the FlatList viewability callbacks stable (RN forbids changing them between renders).
+  const [visiblePages, setVisiblePages] = useState<Set<number>>(new Set());
+  const onViewRef = useRef((info: { viewableItems: Array<{ item: number; isViewable: boolean }> }) => {
+    setVisiblePages(new Set(info.viewableItems.filter((v) => v.isViewable).map((v) => v.item)));
+  });
+  const viewCfgRef = useRef({ itemVisiblePercentThreshold: 10 });
 
   const pages = useMemo(() => [...termsByPage.keys()].sort((a, b) => a - b), [termsByPage]);
   const toGenerate = useMemo(
@@ -228,9 +288,18 @@ function GenerateTab({
     if (!bookId || !pdfUrl || !toGenerate.length || progress) return;
     if (!(await ensureConsent())) return;
     setMsg(null);
+    // Fetch each target page's text PLUS its neighbors (p-1 / p+1) so a definition or sentence split
+    // across a page boundary can still be resolved. Neighbors are reference-only context.
+    const CONTEXT_CHARS = 700;
+    const need = new Set<number>();
+    for (const p of toGenerate) {
+      need.add(p);
+      if (p - 1 >= 0) need.add(p - 1);
+      if (p + 1 < pageCount) need.add(p + 1);
+    }
     let texts: { page: number; text: string }[] = [];
     try {
-      texts = await engine.pageText({ url: pdfUrl, pages: toGenerate });
+      texts = await engine.pageText({ url: pdfUrl, pages: [...need].sort((a, b) => a - b) });
     } catch (e) {
       setMsg("本文の取得に失敗しました：" + (e instanceof Error ? e.message : String(e)));
       return;
@@ -246,8 +315,10 @@ function GenerateTab({
         errors.push(p);
         continue;
       }
+      const prevContext = (textMap.get(p - 1) ?? "").slice(-CONTEXT_CHARS);
+      const nextContext = (textMap.get(p + 1) ?? "").slice(0, CONTEXT_CHARS);
       try {
-        await generatePage({ bookId, pageIndex: p, pageText: text, markedTerms: terms, density, subjectHint: hint, regenerate: false });
+        await generatePage({ bookId, pageIndex: p, pageText: text, markedTerms: terms, density, subjectHint: hint, regenerate: false, prevContext, nextContext });
         done++;
         await onGenerated();
       } catch (e) {
@@ -326,6 +397,11 @@ function GenerateTab({
         automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={header}
+        onViewableItemsChanged={onViewRef.current}
+        viewabilityConfig={viewCfgRef.current}
+        initialNumToRender={9}
+        maxToRenderPerBatch={9}
+        windowSize={5}
         renderItem={({ item: p }) => (
           <PageCard
             engine={engine}
@@ -334,6 +410,7 @@ function GenerateTab({
             terms={termsByPage.get(p)?.length ?? 0}
             generated={countsByPage.get(p) ?? 0}
             selected={selected.has(p)}
+            active={visiblePages.has(p)}
             onToggle={() => toggle(p)}
           />
         )}
@@ -366,6 +443,7 @@ function PageCard({
   terms,
   generated,
   selected,
+  active,
   onToggle,
 }: {
   engine: ReturnType<typeof useDetectionEngine>;
@@ -374,24 +452,25 @@ function PageCard({
   terms: number;
   generated: number;
   selected: boolean;
+  /** true once this row has scrolled into view — only then do we request its (serialized) thumbnail. */
+  active: boolean;
   onToggle: () => void;
 }) {
-  const [uri, setUri] = useState<string | null>(null);
+  const [uri, setUri] = useState<string | null>(() =>
+    pdfUrl ? thumbCache.get(thumbKey(pdfUrl, pageIndex)) ?? null : null,
+  );
   useEffect(() => {
-    if (!pdfUrl || !engine.ready) return;
-    let live = true;
-    void engine
-      .cover({ url: pdfUrl, page: pageIndex, maxWidth: 160 })
-      .then((u) => live && setUri(u))
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [engine, pdfUrl, pageIndex]);
+    if (uri || !pdfUrl || !engine.ready || !active) return; // fetch once, and only after it scrolls in
+    return loadThumb(engine, pdfUrl, pageIndex, setUri);
+  }, [engine, pdfUrl, pageIndex, active, uri]);
   return (
     <Pressable style={[styles.card, selected && styles.cardSel]} onPress={onToggle}>
-      <View style={styles.thumb}>
-        {uri ? <Image source={{ uri }} style={styles.thumbImg} resizeMode="cover" /> : <ActivityIndicator color={colors.sand} />}
+      <View style={[styles.thumb, selected && styles.thumbSel]}>
+        {uri ? (
+          <Image source={{ uri }} style={styles.thumbImg} resizeMode="cover" />
+        ) : (
+          <Text style={styles.thumbPhText}>P.{pageIndex + 1}</Text>
+        )}
         {selected ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>✓</Text>
@@ -551,7 +630,9 @@ const styles = StyleSheet.create({
   card: { flex: 1 / 3, maxWidth: "31%", marginBottom: 10 },
   cardSel: {},
   thumb: { aspectRatio: 0.7, borderRadius: 6, overflow: "hidden", backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  thumbSel: { borderColor: colors.sand },
   thumbImg: { width: "100%", height: "100%" },
+  thumbPhText: { fontSize: 13, fontWeight: "700", color: colors.muted }, // placeholder until the thumb loads
   badge: { position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.sand, alignItems: "center", justifyContent: "center" },
   badgeText: { color: "#fff", fontWeight: "800", fontSize: 13 },
   cardMeta: { flexDirection: "row", justifyContent: "space-between", marginTop: 3 },
