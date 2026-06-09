@@ -1,12 +1,12 @@
 // Root: mounts the app-wide headless detection engine and switches between screens based on
 // the zustand view store. A subscription Gate wraps the router: with no active subscription the
 // app is locked to the paywall, and a Standard subscriber over the book limit must trim down.
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { SafeAreaView, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { EngineProvider } from "./src/engine/EngineProvider";
 import { initPurchases } from "./src/iap/purchases";
-import { effectiveTier, STANDARD_DECK_LIMIT, useEntitlements } from "./src/iap/entitlements";
+import { useEntitlements } from "./src/iap/entitlements";
 import { useApp } from "./src/store/session";
 import { DeckList } from "./src/screens/DeckList";
 import { ImportWizard } from "./src/screens/ImportWizard";
@@ -19,8 +19,9 @@ import { Login } from "./src/screens/Login";
 import { DowngradeSelect } from "./src/screens/DowngradeSelect";
 import { EngineTest } from "./src/screens/EngineTest";
 import { Onboarding } from "./src/screens/Onboarding";
-import { deckCountTotal, getMeta, setMeta } from "./src/db/repo";
+import { getMeta, setMeta } from "./src/db/repo";
 import { loadDeviceName } from "./src/sync/device";
+import { listBooks } from "./src/sync/api";
 import { initAuthListener, isAuthConfigured, useAccount } from "./src/auth/account";
 import { colors } from "./src/ui/theme";
 
@@ -48,39 +49,45 @@ function Router() {
   }
 }
 
-// Subscription gate. Renders above the router so it can't be navigated around.
+// Account gate. Renders above the router so it can't be navigated around. Account-wide model:
+// Free is a USABLE tier (1 book) — no hard paywall lock. The only forced screen is the downgrade
+// trim, driven by the SERVER (trim_required when a downgrade left the account over its cap).
 function Gate() {
   const view = useApp((s) => s.view);
   const decksVersion = useApp((s) => s.decksVersion);
-  const tier = useEntitlements((s) => s.tier);
-  const billingActive = useEntitlements((s) => s.billingActive);
   const ready = useEntitlements((s) => s.ready);
   const user = useAccount((s) => s.user);
   const userReady = useAccount((s) => s.ready);
-  const [deckCount, setDeckCount] = useState<number | null>(null);
-  const refreshCount = useCallback(() => deckCountTotal().then(setDeckCount), []);
+  const [trimRequired, setTrimRequired] = useState(false);
+  const [cap, setCap] = useState(1);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    void refreshCount();
-  }, [refreshCount, tier, billingActive, view.name, decksVersion]);
+    if (!user) {
+      setTrimRequired(false);
+      return;
+    }
+    let live = true;
+    void listBooks()
+      .then((u) => {
+        if (!live) return;
+        setTrimRequired(!!u.trimRequired);
+        setCap(u.cap ?? u.limit ?? 1);
+      })
+      .catch(() => live && setTrimRequired(false)); // fail open — never trap on a network error
+    return () => {
+      live = false;
+    };
+  }, [user, view.name, decksVersion, tick]);
 
-  const eff = effectiveTier({ tier, billingActive });
-
-  if (!ready || deckCount === null || !userReady) return null; // brief splash
-  // Sign-in is REQUIRED (when auth is configured): the app is for signed-in accounts only, so the
-  // bookshelf can't be used (or freely accessed) without an account. Dev/unconfigured stays open.
+  if (!ready || !userReady) return null; // brief splash
+  // Sign-in is REQUIRED (when auth is configured): the app is for signed-in accounts only.
   if (isAuthConfigured && !user) return <Login />;
-  if (eff === "none") {
-    // Locked: reachable only the paywall, login (to restore a subscription), and Info — Info
-    // must stay reachable so a logged-in user can still delete their account (Apple 5.1.1(v)).
+  // Forced trim after a downgrade. Keep Info/login/paywall reachable (Apple 5.1.1(v) + upgrade escape).
+  if (trimRequired) {
     if (view.name === "login") return <Login />;
     if (view.name === "info") return <Info />;
-    return <Paywall locked />;
-  }
-  if (eff === "standard" && deckCount > STANDARD_DECK_LIMIT) {
-    if (view.name === "paywall") return <Paywall />; // upgrade-to-Pro escape
-    if (view.name === "login") return <Login />;
-    if (view.name === "info") return <Info />;
-    return <DowngradeSelect keepLimit={STANDARD_DECK_LIMIT} onResolved={refreshCount} />;
+    if (view.name === "paywall") return <Paywall />;
+    return <DowngradeSelect keepLimit={cap} onResolved={() => setTick((n) => n + 1)} />;
   }
   return <Router />;
 }

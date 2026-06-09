@@ -57,12 +57,19 @@ export async function registerBook(
     method: "POST",
     body: JSON.stringify({ book_id: bookId, name, page_count: pageCount, device }),
   });
-  if (res.status === 403) {
+  if (res.status === 402) {
+    // Account-wide cap reached (the slot was NOT reserved).
     const b = (await res.json().catch(() => ({}))) as { count?: number; limit?: number };
     return { ok: false, limitReached: true, count: b.count, limit: b.limit };
   }
   if (!res.ok) throw new Error(`register failed: ${res.status}`);
   return { ok: true };
+}
+
+/** Resolve a downgrade trim: keep these book ids (server makes the kept set authoritative). */
+export async function submitTrim(keep: string[]): Promise<void> {
+  const res = await authedFetch("/trim", { method: "POST", body: JSON.stringify({ keep }) });
+  if (!res.ok) throw new Error(`trim failed: ${res.status}`);
 }
 
 /** Free an account-global slot (idempotent; 404 is fine). */
@@ -96,18 +103,27 @@ export interface AccountBook {
   page_count: number;
   device: string | null;
   updated_at: number;
+  /** active | retained | trimmed | pending. Only `active` books count toward the cap + are usable. */
+  status?: string;
   /** Pinned to the top of the bookshelf when 1 (synced across the account's devices). */
   favorite: number;
   /** Last-opened time (epoch ms) — drives 最近開いた順; server keeps the MAX across devices. */
   opened_at: number;
 }
 
+export type AccountTier = "free" | "standard" | "pro" | "premium" | "admin";
+
 export interface AccountBooks {
   books: AccountBook[];
+  /** Count of ACTIVE books (the cap-relevant, account-wide count). */
   count: number;
   limit: number;
-  tier: "standard" | "pro" | "admin";
+  tier: AccountTier;
   unlimited: boolean;
+  /** Set after a downgrade leaves the account over its cap — the client forces the trim screen. */
+  trimRequired?: boolean;
+  /** The kept-set target (book cap) after a downgrade. */
+  cap?: number;
 }
 
 /** List the account's books (across all devices) with count + cap + tier. */

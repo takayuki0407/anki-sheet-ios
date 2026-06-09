@@ -110,14 +110,28 @@ export function DeckList() {
   const loadCloud = useCallback(async () => {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
-      setCloud(acct.books.filter((b) => !local.has(b.book_id)));
+      const known = new Set(acct.books.map((b) => b.book_id));
+      const active = new Set(
+        acct.books.filter((b) => (b.status ?? "active") === "active").map((b) => b.book_id),
+      );
+      // Cloud section = ACTIVE account books not on this device (retained/trimmed aren't offered).
+      setCloud(acct.books.filter((b) => !local.has(b.book_id) && active.has(b.book_id)));
       setCloudPro(acct.unlimited); // cloud download/restore is Pro/admin-only
       void backfillCloudIfPro(); // Pro: upload any local book that has no cloud file yet
-      // Adopt favorite / latest-opened state set on other devices for books we also have locally.
+      // Account-wide trim follow: delete local copies of books the server marked non-active.
+      let removed = false;
+      for (const [bid, deckId] of local) {
+        if (known.has(bid) && !active.has(bid)) {
+          await deleteDeck(deckId);
+          void deleteBookQuestions(bid).catch(() => {});
+          removed = true;
+        }
+      }
+      // Adopt favorite / latest-opened state set on other devices for books we still have locally.
       let changed = false;
       for (const b of acct.books) {
         const deckId = local.get(b.book_id);
-        if (deckId == null) continue;
+        if (deckId == null || !active.has(b.book_id)) continue;
         if (((await getMeta(favKey(deckId))) === "1") !== !!b.favorite) {
           await setMeta(favKey(deckId), b.favorite ? "1" : "0");
           changed = true;
@@ -127,7 +141,7 @@ export function DeckList() {
           changed = true;
         }
       }
-      if (changed) await load();
+      if (changed || removed) await load();
     } catch {
       setCloud([]); // signed out / offline — no cloud section
       setCloudPro(false);
@@ -225,13 +239,26 @@ export function DeckList() {
   }, [items, engine]);
 
   const onImport = useCallback(async () => {
-    const n = await deckCountTotal();
-    if (!canAddDeck(n, tier)) {
-      setView({ name: "paywall" });
-      return;
+    // Account-wide cap: block past the tier's allowance ACROSS THE WHOLE ACCOUNT (Free 1 / Standard
+    // 10 / Pro+ unlimited). Fail open if unreachable — the server re-checks atomically on register.
+    try {
+      const acct = await listBooks();
+      if (!acct.unlimited && acct.count >= acct.limit) {
+        Alert.alert(
+          "上限に達しています",
+          `本はプランの上限（${acct.limit} 冊）に達しています。不要な本を削除するか、上位プランにアップグレードしてください。`,
+          [
+            { text: "閉じる", style: "cancel" },
+            { text: "アップグレード", onPress: () => setView({ name: "paywall" }) },
+          ],
+        );
+        return;
+      }
+    } catch {
+      /* fail open — offline; the server re-checks on register */
     }
     setView({ name: "import" });
-  }, [tier, setView]);
+  }, [setView]);
 
   const pickView = useCallback(() => {
     Alert.alert("表示方法", undefined, [

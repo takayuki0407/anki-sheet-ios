@@ -1,12 +1,13 @@
-// Shown (forced, by App's Gate) when a Standard subscriber holds more books than the plan
-// allows — e.g. after downgrading from Pro or after the trial. The user picks which books to
-// keep; the rest are deleted. Escapes: back up first, or upgrade to Pro to keep everything.
+// 強制トリム — shown (forced, by App's gate) when the server flags `trim_required` after a downgrade
+// left the account over its book cap. The list is the ACCOUNT-WIDE book set (all devices), so the
+// user picks the global kept set even for books not on this device. POST /api/sync/trim makes the
+// kept set authoritative; this device then deletes its local copies of the non-kept books. Other
+// devices follow on their next sync. Escape: back up first, or upgrade.
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -14,15 +15,11 @@ import {
 } from "react-native";
 import * as Sharing from "expo-sharing";
 import { useApp } from "../store/session";
-import { deleteDeck, getCover, listDecks } from "../db/repo";
+import { deleteBookQuestions, deleteDeck } from "../db/repo";
+import { localBookIds } from "../sync/deck";
+import { listBooks, submitTrim, type AccountBook } from "../sync/api";
 import { exportBackup } from "../db/backup";
-import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
-
-interface VM {
-  deck: DeckRow;
-  cover?: string;
-}
 
 export function DowngradeSelect({
   keepLimit,
@@ -32,30 +29,25 @@ export function DowngradeSelect({
   onResolved: () => Promise<void> | void;
 }) {
   const setView = useApp((s) => s.setView);
-  const [items, setItems] = useState<VM[] | null>(null);
-  const [keep, setKeep] = useState<Set<number>>(new Set());
+  const [books, setBooks] = useState<AccountBook[] | null>(null);
+  const [keep, setKeep] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [backedUp, setBackedUp] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const decks = await listDecks();
-      const vms = await Promise.all(
-        decks.map(async (deck) => ({ deck, cover: await getCover(deck.id) })),
-      );
-      setItems(vms);
-    })();
+    void listBooks()
+      .then((u) => setBooks(u.books))
+      .catch(() => setBooks([]));
   }, []);
 
   const toggle = useCallback(
-    (id: number) => {
+    (id: string) =>
       setKeep((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
         else if (next.size < keepLimit) next.add(id);
         return next;
-      });
-    },
+      }),
     [keepLimit],
   );
 
@@ -74,24 +66,29 @@ export function DowngradeSelect({
   }, []);
 
   const apply = useCallback(() => {
-    if (!items) return;
-    const remove = items.filter((it) => !keep.has(it.deck.id));
+    if (!books) return;
+    const removeCount = books.length - keep.size;
     const warn = backedUp ? "" : "⚠ バックアップはまだ書き出していません。\n";
     Alert.alert(
       "確認",
-      `${warn}選んだ ${keep.size} 冊を残し、ほかの ${remove.length} 冊を削除します。この操作は元に戻せません。`,
+      `${warn}選んだ ${keep.size} 冊を残し、ほかの ${removeCount} 冊をアカウントから外します。各端末から削除されます。この操作は元に戻せません。`,
       [
         { text: "キャンセル", style: "cancel" },
         {
-          text: "削除して続ける",
+          text: "残して続ける",
           style: "destructive",
           onPress: async () => {
             try {
               setBusy(true);
-              // Delete the non-kept books from THIS device only — the cloud copy is KEPT (preserved)
-              // so re-upgrading to Pro can restore them. Per-device limit, so the account/cloud isn't
-              // trimmed here. (Locked cloud data is purged after 6 months by the retention job.)
-              for (const it of remove) await deleteDeck(it.deck.id);
+              await submitTrim([...keep]);
+              // Reconcile THIS device: delete local copies of books that weren't kept.
+              const ids = await localBookIds(); // Map<bookId, deckId>
+              for (const [bid, deckId] of ids) {
+                if (!keep.has(bid)) {
+                  await deleteDeck(deckId);
+                  void deleteBookQuestions(bid).catch(() => {});
+                }
+              }
               await onResolved();
               setView({ name: "decks" });
             } catch (e) {
@@ -103,56 +100,45 @@ export function DowngradeSelect({
         },
       ],
     );
-  }, [items, keep, backedUp, onResolved, setView]);
+  }, [books, keep, backedUp, onResolved, setView]);
 
-  if (!items)
+  if (!books)
     return (
       <View style={styles.center}>
         <ActivityIndicator color={colors.sand} />
       </View>
     );
 
-  const target = Math.min(keepLimit, items.length);
+  const target = Math.min(keepLimit, books.length);
   const canApply = keep.size === target && !busy;
 
   return (
     <View style={styles.c}>
       <Text style={styles.title}>残す本を選んでください</Text>
       <Text style={styles.lead}>
-        Standardプランは本を {keepLimit} 冊まで保存できます。残す本を {keepLimit} 冊選んでください。
-        選ばなかった本は削除されます。すべて残したい場合は Pro（無制限）にアップグレードできます。
+        現在のプランの上限は {keepLimit} 冊です。アカウント全体（すべての端末）の本から、残す{" "}
+        {keepLimit} 冊を選んでください。選ばなかった本は各端末から削除されます（Proで取り込んだ本は
+        クラウドに保持され、再びProにすると復元できます）。
       </Text>
       <Text style={styles.counter}>
         {keep.size} / {target} 冊を選択
       </Text>
 
       <FlatList
-        data={items}
-        keyExtractor={(it) => String(it.deck.id)}
-        numColumns={3}
-        columnWrapperStyle={styles.row}
-        contentContainerStyle={styles.grid}
+        data={books}
+        keyExtractor={(b) => b.book_id}
+        contentContainerStyle={styles.list}
         renderItem={({ item }) => {
-          const sel = keep.has(item.deck.id);
+          const sel = keep.has(item.book_id);
           return (
-            <Pressable style={styles.card} onPress={() => toggle(item.deck.id)}>
-              <View style={[styles.coverWrap, sel && styles.coverSel]}>
-                {item.cover ? (
-                  <Image source={{ uri: item.cover }} style={styles.cover} resizeMode="cover" />
-                ) : (
-                  <View style={[styles.cover, styles.ph]}>
-                    <Text style={styles.muted}>PDF</Text>
-                  </View>
-                )}
-                {sel ? (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>✓</Text>
-                  </View>
-                ) : null}
+            <Pressable style={[styles.row, sel && styles.rowSel]} onPress={() => toggle(item.book_id)}>
+              <View style={[styles.check, sel && styles.checkSel]}>
+                {sel ? <Text style={styles.checkText}>✓</Text> : null}
               </View>
-              <Text style={styles.name} numberOfLines={2}>
-                {item.deck.name}
+              <Text style={styles.name} numberOfLines={1}>
+                {item.name || "（無題）"}
               </Text>
+              {item.device ? <Text style={styles.device}>{item.device}</Text> : null}
             </Pressable>
           );
         }}
@@ -166,14 +152,14 @@ export function DowngradeSelect({
             </Text>
           </Pressable>
           <Pressable onPress={() => setView({ name: "paywall" })} hitSlop={8} disabled={busy}>
-            <Text style={styles.secondary}>Proにアップグレード</Text>
+            <Text style={styles.secondary}>アップグレード</Text>
           </Pressable>
         </View>
         <Pressable style={[styles.primary, !canApply && styles.disabled]} disabled={!canApply} onPress={apply}>
           {busy ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.primaryText}>選んだ {target} 冊を残して削除</Text>
+            <Text style={styles.primaryText}>選んだ {target} 冊を残す</Text>
           )}
         </Pressable>
       </View>
@@ -187,34 +173,32 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: "800", color: colors.text, textAlign: "center", marginTop: 8 },
   lead: { fontSize: 13, color: colors.textSub, textAlign: "center", lineHeight: 20, marginTop: 8 },
   counter: { fontSize: 14, fontWeight: "700", color: colors.sand, textAlign: "center", marginVertical: 10 },
-  grid: { paddingBottom: 12 },
-  row: { gap: 10 },
-  card: { flex: 1, marginBottom: 14 },
-  coverWrap: {
-    aspectRatio: 0.72,
-    borderRadius: 10,
-    overflow: "hidden",
-    backgroundColor: colors.surface,
-    borderWidth: 2,
+  list: { paddingBottom: 12, gap: 6 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
     borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
-  coverSel: { borderColor: colors.sand },
-  cover: { width: "100%", height: "100%" },
-  ph: { alignItems: "center", justifyContent: "center" },
-  muted: { color: colors.muted, fontSize: 13 },
-  badge: {
-    position: "absolute",
-    top: 6,
-    right: 6,
+  rowSel: { borderColor: colors.sand, backgroundColor: "rgba(212,163,115,0.12)" },
+  check: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: colors.sand,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
   },
-  badgeText: { color: "#fff", fontWeight: "800", fontSize: 14 },
-  name: { marginTop: 6, fontSize: 12, fontWeight: "600", color: colors.text },
+  checkSel: { backgroundColor: colors.sand, borderColor: colors.sand },
+  checkText: { color: "#fff", fontWeight: "800", fontSize: 13 },
+  name: { flex: 1, fontSize: 15, color: colors.text },
+  device: { fontSize: 11, color: colors.muted },
   actions: { gap: 10, paddingTop: 8 },
   secondaryRow: { flexDirection: "row", justifyContent: "space-around" },
   secondary: { color: colors.ocean, fontSize: 14, textAlign: "center", paddingVertical: 6 },
