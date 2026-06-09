@@ -102,6 +102,7 @@ export function DeckList() {
   // slot, or it lingers as a phantom that counts toward the cap and can't be restored.
   const cloudBlobIdsRef = useRef<Set<string>>(new Set());
   const cloudReadyRef = useRef(false);
+  const cloudDeviceByDeckRef = useRef<Map<number, string | null>>(new Map()); // deckId -> holder name
   // Per-deck cloud-backed status for the bookshelf badge + delete warning: deckIds whose account book
   // has a cloud copy (size>0). cloudKnown=false until the first successful listBooks (→ warn safe-side).
   const [cloudBackedDecks, setCloudBackedDecks] = useState<Set<number>>(new Set());
@@ -147,10 +148,21 @@ export function DeckList() {
       setCloud(acct.books.filter((b) => !local.has(b.book_id) && active.has(b.book_id)));
       setCloudPro(acct.unlimited); // cloud download/restore is Pro/admin-only
       void backfillCloudIfPro(); // Pro: upload any local book that has no cloud file yet
-      // Account-wide trim follow: delete local copies of books the server marked non-active.
+      // Per-deck holder name (for the delete-clears-holder logic) + single-home setup.
+      const me = deviceLabel();
+      const singleHome = !acct.unlimited; // Standard/Free: a book lives on ONE device (the holder)
+      const devMap = new Map<number, string | null>();
+      const devByBook = new Map(acct.books.map((b) => [b.book_id, b.device ?? null] as const));
+      for (const [bid, deckId] of local) devMap.set(deckId, devByBook.get(bid) ?? null);
+      cloudDeviceByDeckRef.current = devMap;
+      // Account-wide trim follow: delete local copies of books the server marked non-active; on a
+      // non-sync tier ALSO drop active books now held by another device (single-home).
       let removed = false;
       for (const [bid, deckId] of local) {
-        if (known.has(bid) && !active.has(bid)) {
+        const nonActive = known.has(bid) && !active.has(bid);
+        const heldElsewhere =
+          singleHome && active.has(bid) && !!devByBook.get(bid) && devByBook.get(bid) !== me;
+        if (nonActive || heldElsewhere) {
           await deleteDeck(deckId);
           void deleteBookQuestions(bid).catch(() => {});
           removed = true;
@@ -428,8 +440,16 @@ export function DeckList() {
               await deleteDeck(deck.id);
               if (bid) {
                 void deleteBookQuestions(bid).catch(() => {}); // drop this device's AI questions
-                if (cloudReadyRef.current && !cloudBlobIdsRef.current.has(bid))
-                  void unregisterBook(bid).catch(() => {});
+                if (cloudReadyRef.current && !cloudBlobIdsRef.current.has(bid)) {
+                  void unregisterBook(bid).catch(() => {}); // no cloud copy → free the slot
+                } else if (
+                  cloudReadyRef.current &&
+                  cloudBlobIdsRef.current.has(bid) &&
+                  cloudDeviceByDeckRef.current.get(deck.id) === deviceLabel()
+                ) {
+                  // We were the holder of this cloud-backed book → clear the holder (now cloud-only).
+                  void updateBookMeta(bid, { device: null }).catch(() => {});
+                }
               }
               bumpDecks();
               load();
@@ -592,7 +612,7 @@ export function DeckList() {
                         {b.name || "（無題）"}
                       </Text>
                       <Text style={styles.cloudDevice}>
-                        {b.size > 0 ? (b.device ?? "") : "クラウド保存なし"}
+                        {b.size > 0 ? b.device || "クラウドのみ" : "クラウド保存なし"}
                       </Text>
                     </View>
                     {b.size > 0 && cloudPro ? (

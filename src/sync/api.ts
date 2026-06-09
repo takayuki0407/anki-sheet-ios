@@ -83,12 +83,12 @@ export async function unregisterBook(bookId: string): Promise<void> {
  * ignore errors, and a missing/standard book is a harmless no-op on the server. */
 export async function updateBookMeta(
   bookId: string,
-  patch: { favorite?: boolean; openedAt?: number; device?: string },
+  patch: { favorite?: boolean; openedAt?: number; device?: string | null },
 ): Promise<void> {
-  const body: { favorite?: boolean; opened_at?: number; device?: string } = {};
+  const body: { favorite?: boolean; opened_at?: number; device?: string | null } = {};
   if (patch.favorite !== undefined) body.favorite = patch.favorite;
   if (patch.openedAt !== undefined) body.opened_at = patch.openedAt;
-  if (patch.device !== undefined) body.device = patch.device;
+  if (patch.device !== undefined) body.device = patch.device; // null/"" clears the holder
   const res = await authedFetch(`/books/${encodeURIComponent(bookId)}`, {
     method: "PATCH",
     body: JSON.stringify(body),

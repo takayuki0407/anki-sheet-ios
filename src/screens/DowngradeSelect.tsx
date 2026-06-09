@@ -16,8 +16,9 @@ import {
 import * as Sharing from "expo-sharing";
 import { useApp } from "../store/session";
 import { deleteBookQuestions, deleteDeck } from "../db/repo";
-import { localBookIds } from "../sync/deck";
-import { listBooks, submitTrim, type AccountBook } from "../sync/api";
+import { downloadDeck, localBookIds } from "../sync/deck";
+import { listBooks, submitTrim, updateBookMeta, type AccountBook } from "../sync/api";
+import { deviceLabel } from "../sync/device";
 import { exportBackup } from "../db/backup";
 import { colors } from "../ui/theme";
 
@@ -71,7 +72,7 @@ export function DowngradeSelect({
     const warn = backedUp ? "" : "⚠ バックアップはまだ書き出していません。\n";
     Alert.alert(
       "確認",
-      `${warn}選んだ ${keep.size} 冊を残し、ほかの ${removeCount} 冊をアカウントから外します。各端末から削除されます。この操作は元に戻せません。`,
+      `${warn}選んだ ${keep.size} 冊をこの端末に保存します。外した ${removeCount} 冊のうち、クラウド保存がある本はクラウドに退避し、Proに戻すと復元できます（保持〜約6ヶ月）。クラウド保存の無い本（端末のみ）は完全に削除されます。Standardは端末間同期がないため、他の端末のローカルコピーは次回起動時に削除されます。`,
       [
         { text: "キャンセル", style: "cancel" },
         {
@@ -87,6 +88,20 @@ export function DowngradeSelect({
                 if (!keep.has(bid)) {
                   await deleteDeck(deckId);
                   void deleteBookQuestions(bid).catch(() => {});
+                }
+              }
+              // Materialize kept books not on THIS device (now allowed on any tier for active books),
+              // then CLAIM the holder — but only AFTER a successful download, so a failure never
+              // leaves the book with no device (it stays in the cloud section as "ダウンロード待ち").
+              const me = deviceLabel();
+              for (const b of books) {
+                if (keep.has(b.book_id) && !ids.has(b.book_id) && b.size > 0) {
+                  try {
+                    await downloadDeck(b);
+                    await updateBookMeta(b.book_id, { device: me }).catch(() => {});
+                  } catch {
+                    /* offline / large → retry from the bookshelf cloud section */
+                  }
                 }
               }
               await onResolved();
@@ -117,8 +132,9 @@ export function DowngradeSelect({
       <Text style={styles.title}>残す本を選んでください</Text>
       <Text style={styles.lead}>
         現在のプランの上限は {keepLimit} 冊です。アカウント全体（すべての端末）の本から、残す{" "}
-        {keepLimit} 冊を選んでください。選ばなかった本は各端末から削除されます（Proで取り込んだ本は
-        クラウドに保持され、再びProにすると復元できます）。
+        {keepLimit} 冊を選んでください。残した本はこの端末に保存されます。選ばなかった本のうち、
+        クラウド保存がある本はクラウドに退避し、Proに戻すと復元できます（保持〜約6ヶ月）。クラウド
+        保存の無い本（端末のみ）は完全に削除されます。
       </Text>
       <Text style={styles.counter}>
         {keep.size} / {target} 冊を選択
