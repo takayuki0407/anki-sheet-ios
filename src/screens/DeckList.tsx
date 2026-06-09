@@ -542,12 +542,14 @@ export function DeckList() {
           contentContainerStyle={styles.grid}
           renderItem={viewMode === "list" ? renderList : renderGrid}
           ListFooterComponent={
-            cloudPro && cloud.length > 0 ? (
+            cloud.length > 0 ? (
               <View style={styles.cloudSection}>
                 <Text style={styles.cloudTitle}>クラウド（この端末にない本）</Text>
                 <Text style={styles.cloudNote}>
-                  同じアカウントの本です。「取り込む」で追加、「削除」ですべての端末から完全に削除します。
-                  クラウド保存のない本（他端末のみ・アップロード未完了）はダウンロードできませんが、「削除」で枠を空けられます。
+                  同じアカウントの本です。
+                  {cloudPro ? "「取り込む」で追加、" : ""}
+                  「削除」ですべての端末から完全に削除します。クラウド保存のない本（他端末のみ・
+                  アップロード未完了）はダウンロードできませんが、「削除」で枠を空けられます。
                 </Text>
                 {cloud.map((b) => (
                   <View key={b.book_id} style={styles.cloudRow}>
@@ -559,7 +561,7 @@ export function DeckList() {
                         {b.size > 0 ? (b.device ?? "") : "クラウド保存なし"}
                       </Text>
                     </View>
-                    {b.size > 0 ? (
+                    {b.size > 0 && cloudPro ? (
                       <Pressable
                         style={styles.cloudBtn}
                         disabled={downloading.has(b.book_id)}
