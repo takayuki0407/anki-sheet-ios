@@ -35,9 +35,9 @@ function Router() {
     case "viewer":
       return <PageViewer key={view.deckId} deckId={view.deckId} />;
     case "settings":
-      return <Settings key={view.deckId} deckId={view.deckId} />;
+      return <Settings key={view.deckId} deckId={view.deckId} from={view.from} />;
     case "quiz":
-      return <Quiz key={view.deckId} deckId={view.deckId} />;
+      return <Quiz key={view.deckId} deckId={view.deckId} from={view.from} />;
     case "paywall":
       return <Paywall />;
     case "info":

@@ -15,7 +15,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useApp } from "../store/session";
+import { useApp, type View as AppView } from "../store/session";
 import { useAccount } from "../auth/account";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import { deckCards, getDeck, getDeckPdf, getBookQuestions } from "../db/repo";
@@ -41,7 +41,7 @@ const DENSITIES: { key: Density; label: string }[] = [
   { key: "many", label: "多め" },
 ];
 
-export function Quiz({ deckId }: { deckId: number }) {
+export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
   const setView = useApp((s) => s.setView);
   const user = useAccount((s) => s.user);
   const engine = useDetectionEngine();
@@ -74,11 +74,13 @@ export function Quiz({ deckId }: { deckId: number }) {
       setName(d?.name ?? "");
       setPdfUrl(pdf?.filePath ?? null);
       setBookId(bid ?? null);
+      // Register EVERY page that has an answer (memorization spot), pushing the recovered answer text
+      // only when present. The page list keys off this map, so pages whose answers have no recovered
+      // text (e.g. CID fonts without ToUnicode) still appear — the AI reads full page text separately.
       const m = new Map<number, string[]>();
       for (const c of cards) {
-        if (!c.text?.trim()) continue;
         const arr = m.get(c.pageIndex) ?? [];
-        arr.push(c.text);
+        if (c.text?.trim()) arr.push(c.text);
         m.set(c.pageIndex, arr);
       }
       setTermsByPage(m);
@@ -102,8 +104,8 @@ export function Quiz({ deckId }: { deckId: number }) {
   return (
     <View style={styles.c}>
       <View style={styles.head}>
-        <Pressable onPress={() => setView({ name: "decks" })} hitSlop={8}>
-          <Text style={styles.back}>← 本棚</Text>
+        <Pressable onPress={() => setView(from ?? { name: "decks" })} hitSlop={8}>
+          <Text style={styles.back}>← 戻る</Text>
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>
           AI問題 — {name}

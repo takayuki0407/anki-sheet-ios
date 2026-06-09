@@ -643,11 +643,17 @@ export function PageViewer({ deckId }: { deckId: number }) {
         <Text style={styles.title} numberOfLines={1}>
           {name}
         </Text>
-        <Pressable onPress={() => setView({ name: "quiz", deckId })} hitSlop={10}>
+        <Pressable
+          onPress={() => setView({ name: "quiz", deckId, from: { name: "viewer", deckId } })}
+          hitSlop={10}
+        >
           <Text style={styles.topBtn}>問題</Text>
         </Pressable>
-        <Pressable onPress={() => setView({ name: "settings", deckId })} hitSlop={10}>
-          <Text style={styles.topBtn}>⚙</Text>
+        <Pressable
+          onPress={() => setView({ name: "settings", deckId, from: { name: "viewer", deckId } })}
+          hitSlop={10}
+        >
+          <Text style={styles.gearBtn}>⚙</Text>
         </Pressable>
       </View>
 
@@ -816,6 +822,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   topBtn: { color: colors.ocean, fontSize: 16 },
+  gearBtn: { color: colors.ocean, fontSize: 18, marginLeft: 20 }, // separated from 問題 so they don't crowd
   title: { flex: 1, textAlign: "center", fontSize: 15, fontWeight: "700", color: colors.text },
   viewerWrap: { flex: 1 },
   bottom: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: 6 },

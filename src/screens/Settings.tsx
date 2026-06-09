@@ -13,7 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useApp } from "../store/session";
+import { useApp, type View as AppView } from "../store/session";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import {
   deleteDeck,
@@ -60,7 +60,7 @@ function Stepper({
   );
 }
 
-export function Settings({ deckId }: { deckId: number }) {
+export function Settings({ deckId, from }: { deckId: number; from?: AppView }) {
   const setView = useApp((s) => s.setView);
   const engine = useDetectionEngine();
   const [url, setUrl] = useState<string | null>(null);
@@ -172,8 +172,8 @@ export function Settings({ deckId }: { deckId: number }) {
 
   const back = useCallback(async () => {
     await updateDeck(deckId, { name: name.trim() || "無題" });
-    setView({ name: "decks" });
-  }, [deckId, name, setView]);
+    setView(from ?? { name: "decks" }); // return to wherever this was opened from (viewer / bookshelf)
+  }, [deckId, name, setView, from]);
 
   const confirmDelete = () =>
     Alert.alert("削除しますか?", `「${name}」と検出結果を削除します。`, [
@@ -203,7 +203,7 @@ export function Settings({ deckId }: { deckId: number }) {
     <View style={styles.c}>
       <View style={styles.top}>
         <Pressable onPress={back} hitSlop={10}>
-          <Text style={styles.link}>← 本棚</Text>
+          <Text style={styles.link}>← 戻る</Text>
         </Pressable>
         <Text style={styles.title}>設定・再検出</Text>
         <View style={{ width: 48 }} />
