@@ -81,12 +81,12 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         <View style={styles.plans}>
           <View style={styles.plan}>
             <Text style={styles.planName}>Standard</Text>
-            <Text style={styles.planPrice}>¥300/月 ・ ¥2,500/年</Text>
+            <Text style={styles.planPrice}>¥300/月 ・ ¥3,000/年</Text>
             <Text style={styles.planDesc}>本を {STANDARD_DECK_LIMIT} 冊まで取り込み</Text>
           </View>
           <View style={[styles.plan, styles.planPro]}>
             <Text style={styles.planName}>Pro</Text>
-            <Text style={styles.planPrice}>¥600/月 ・ ¥5,000/年</Text>
+            <Text style={styles.planPrice}>¥600/月 ・ ¥6,000/年</Text>
             <Text style={styles.planDesc}>本を無制限に取り込み＋クラウドストレージ5GB・全ての端末/プラットフォームで進捗同期</Text>
           </View>
         </View>
