@@ -99,6 +99,11 @@ export function DeckList() {
   const [cloud, setCloud] = useState<AccountBook[]>([]);
   const [cloudPro, setCloudPro] = useState(false); // cloud section is Pro-only (download/restore)
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
+  // Book ids the account has a downloadable cloud blob for (size>0), from the last loadCloud. A local
+  // delete of a book NOT in this set (Standard / upload never finished) must also free its account
+  // slot, or it lingers as a phantom that counts toward the cap and can't be restored.
+  const cloudBlobIdsRef = useRef<Set<string>>(new Set());
+  const cloudReadyRef = useRef(false);
 
   const load = useCallback(async () => {
     const decks = await listDecks();
@@ -118,6 +123,10 @@ export function DeckList() {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
       void cacheQuota(acct); // remember the cap for offline import enforcement (§2.2a)
+      cloudBlobIdsRef.current = new Set(
+        acct.books.filter((b) => b.size > 0).map((b) => b.book_id),
+      );
+      cloudReadyRef.current = true;
       const known = new Set(acct.books.map((b) => b.book_id));
       const active = new Set(
         acct.books.filter((b) => (b.status ?? "active") === "active").map((b) => b.book_id),
@@ -392,12 +401,17 @@ export function DeckList() {
             text: "削除",
             style: "destructive",
             onPress: async () => {
-              // Local-only delete: do NOT remove the cloud copy. The account's cloud master persists
-              // so OTHER devices keep it and this device can re-download it. Permanent cloud deletion
-              // is the「クラウドから削除」action in the cloud section.
+              // Local-only delete: a book WITH a cloud blob stays in the account (restorable). But a
+              // book with NO cloud blob (Standard / upload never finished) isn't stored anywhere, so
+              // keeping its registry row would leak a cap slot as an unrecoverable phantom — unregister
+              // it too. (Cloud deletion of a blob-backed book is the explicit「クラウドから削除」.)
               const bid = await deckBookId(deck.id);
               await deleteDeck(deck.id);
-              if (bid) void deleteBookQuestions(bid).catch(() => {}); // drop this device's AI questions
+              if (bid) {
+                void deleteBookQuestions(bid).catch(() => {}); // drop this device's AI questions
+                if (cloudReadyRef.current && !cloudBlobIdsRef.current.has(bid))
+                  void unregisterBook(bid).catch(() => {});
+              }
               bumpDecks();
               load();
               void loadCloud();
@@ -533,17 +547,19 @@ export function DeckList() {
                 <Text style={styles.cloudTitle}>クラウド（この端末にない本）</Text>
                 <Text style={styles.cloudNote}>
                   同じアカウントの本です。「取り込む」で追加、「削除」ですべての端末から完全に削除します。
+                  クラウド保存のない本（他端末のみ・アップロード未完了）はダウンロードできませんが、「削除」で枠を空けられます。
                 </Text>
-                {cloud
-                  .filter((b) => b.size > 0)
-                  .map((b) => (
-                    <View key={b.book_id} style={styles.cloudRow}>
-                      <View style={styles.cloudInfo}>
-                        <Text style={styles.cloudName} numberOfLines={1}>
-                          {b.name || "（無題）"}
-                        </Text>
-                        {b.device ? <Text style={styles.cloudDevice}>{b.device}</Text> : null}
-                      </View>
+                {cloud.map((b) => (
+                  <View key={b.book_id} style={styles.cloudRow}>
+                    <View style={styles.cloudInfo}>
+                      <Text style={styles.cloudName} numberOfLines={1}>
+                        {b.name || "（無題）"}
+                      </Text>
+                      <Text style={styles.cloudDevice}>
+                        {b.size > 0 ? (b.device ?? "") : "クラウド保存なし"}
+                      </Text>
+                    </View>
+                    {b.size > 0 ? (
                       <Pressable
                         style={styles.cloudBtn}
                         disabled={downloading.has(b.book_id)}
@@ -553,15 +569,16 @@ export function DeckList() {
                           {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
                         </Text>
                       </Pressable>
-                      <Pressable
-                        style={styles.cloudDeleteBtn}
-                        disabled={downloading.has(b.book_id)}
-                        onPress={() => onRemoveCloud(b)}
-                      >
-                        <Text style={styles.cloudDeleteText}>削除</Text>
-                      </Pressable>
-                    </View>
-                  ))}
+                    ) : null}
+                    <Pressable
+                      style={styles.cloudDeleteBtn}
+                      disabled={downloading.has(b.book_id)}
+                      onPress={() => onRemoveCloud(b)}
+                    >
+                      <Text style={styles.cloudDeleteText}>削除</Text>
+                    </Pressable>
+                  </View>
+                ))}
               </View>
             ) : null
           }
