@@ -66,7 +66,7 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         </Pressable>
       )}
       <View style={styles.body}>
-        <Text style={styles.title}>Anki-sheet を始める</Text>
+        <Text style={styles.title}>Kiokumate を始める</Text>
         <Text style={styles.lead}>まず7日間は無料。いつでも解約できます。</Text>
         {locked && user ? (
           <Text style={styles.accountNote}>

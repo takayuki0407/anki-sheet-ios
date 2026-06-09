@@ -143,7 +143,7 @@ export async function exportBackup(): Promise<string> {
     meta,
   };
 
-  const out = new File(Paths.document, "anki-sheet-backup.json");
+  const out = new File(Paths.document, "kiokumate-backup.json");
   if (out.exists) out.delete();
   out.create();
   out.write(JSON.stringify(data));
@@ -154,7 +154,8 @@ export async function exportBackup(): Promise<string> {
 export async function importBackup(fileUri: string): Promise<void> {
   const text = await new File(fileUri).text();
   const data = JSON.parse(text) as BackupFile;
-  if (data.app !== "anki-sheet") throw new Error("Anki-sheetのバックアップではありません");
+  // The on-disk marker stays "anki-sheet" for cross-version/web backup compat; only the message changes.
+  if (data.app !== "anki-sheet") throw new Error("Kiokumate のバックアップではありません");
   if (data.version !== 2) {
     throw new Error("対応していないバックアップ形式です (version " + String(data.version) + ")");
   }

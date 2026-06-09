@@ -112,9 +112,9 @@ export function Info() {
   }, [deviceName]);
 
   const contact = useCallback(() => {
-    const subject = encodeURIComponent("Anki-sheet お問い合わせ");
+    const subject = encodeURIComponent("Kiokumate お問い合わせ");
     const body = encodeURIComponent(
-      `\n\n────────\nApp: Anki-sheet ${APP_VERSION}\niOS: ${String(Platform.Version)}\n（不具合の場合は、再現手順とPDFの種類を書いていただけると助かります）`,
+      `\n\n────────\nApp: Kiokumate ${APP_VERSION}\niOS: ${String(Platform.Version)}\n（不具合の場合は、再現手順とPDFの種類を書いていただけると助かります）`,
     );
     Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`).catch(() =>
       Alert.alert("メールを開けません", SUPPORT_EMAIL),
@@ -209,7 +209,7 @@ export function Info() {
       <ScrollView contentContainerStyle={styles.pad}>
         <Section title="使い方">
           <Help
-            q="Anki-sheetとは？"
+            q="Kiokumate（キオクメイト）とは？"
             a="色付きの答え（赤やマゼンタ）が印刷されたPDFを取り込むと、答えの部分を自動で検出して隠せます。タップで答えを確認しながら暗記でき、隠し方は『赤マスク』（答えを個別に隠す）と『赤シート』（半透明のシートをスライド）から選べます。PDFの解析は端末内で完結します（解析のために送信されることはありません）。クラウド同期（Pro）を使う場合のみ、ご自身の端末間で共有するためにPDFがアカウントに保存されます。"
           />
           <Help

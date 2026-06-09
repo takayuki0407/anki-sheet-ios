@@ -489,7 +489,7 @@ export function DeckList() {
       <View style={styles.header}>
         <View style={styles.brandRow}>
           <Image source={require("../../assets/icon.png")} style={styles.brandIcon} />
-          <Text style={styles.brand}>Anki-sheet</Text>
+          <Text style={styles.brand}>Kiokumate</Text>
         </View>
         <View style={styles.headerBtns}>
           <Pressable style={styles.addBtn} onPress={onImport}>

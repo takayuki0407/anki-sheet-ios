@@ -1,6 +1,9 @@
-# Anki-sheet iOS — ビルド / 公開ガイド（Windows・Mac不要）
+# Kiokumate iOS — ビルド / 公開ガイド（Windows・Mac不要）
 
-Anki-sheet の iOS 版（Expo / React Native）。色付き答えのPDFを取り込み、答えを自動検出して
+> 旧称 Anki-sheet。表示名のみ Kiokumate（キオクメイト）に統一。slug `anki-sheet-ios`・
+> bundleId `com.takayuki0407.ankisheet` 等のインフラ識別子は据え置き。
+
+Kiokumate の iOS 版（Expo / React Native）。色付き答えのPDFを取り込み、答えを自動検出して
 隠せる暗記アプリ。PDFのレンダリングと色検出は
 WebView 内の pdf.js エンジン（`engine-src` をビルドした `assets/engine.zip`）で行い、
 ストレージは expo-sqlite + ファイル、課金は RevenueCat（サブスク）。

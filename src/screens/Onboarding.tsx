@@ -16,7 +16,7 @@ import { colors } from "../ui/theme";
 const SLIDES = [
   {
     emoji: "📕",
-    title: "Anki-sheet へようこそ",
+    title: "Kiokumate へようこそ",
     body: "色付きの答え（赤・マゼンタなど）が印刷されたPDFを取り込むと、答えの部分を自動で検出して隠せます。タップで確認しながら暗記。PDFの解析は端末内で完結します。クラウド同期（Pro）を使う場合のみ、ご自身の端末間共有のためにアカウントへ保存されます。",
   },
   {
