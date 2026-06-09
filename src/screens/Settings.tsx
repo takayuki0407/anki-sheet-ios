@@ -209,7 +209,11 @@ export function Settings({ deckId }: { deckId: number }) {
         <View style={{ width: 48 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.pad}>
+      <ScrollView
+        contentContainerStyle={styles.pad}
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.previewBox}>
           {preview ? (
             <Image source={{ uri: preview.dataUrl }} style={styles.preview} resizeMode="contain" />

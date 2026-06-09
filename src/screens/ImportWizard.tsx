@@ -218,7 +218,11 @@ export function ImportWizard() {
       <Text style={styles.title}>PDFを取り込む</Text>
 
       {phase === "idle" && (
-        <ScrollView contentContainerStyle={styles.pad}>
+        <ScrollView
+          contentContainerStyle={styles.pad}
+          automaticallyAdjustKeyboardInsets
+          keyboardShouldPersistTaps="handled"
+        >
           <Text style={styles.help}>
             赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選び、次の画面で答えの色（自動／赤・マゼンタなど）を選んで検出します。
           </Text>
@@ -229,7 +233,11 @@ export function ImportWizard() {
       )}
 
       {phase === "configuring" && (
-        <ScrollView contentContainerStyle={styles.pad}>
+        <ScrollView
+          contentContainerStyle={styles.pad}
+          automaticallyAdjustKeyboardInsets
+          keyboardShouldPersistTaps="handled"
+        >
           <Text style={styles.help}>「{name || "無題"}」を取り込みます。答えの色を選んでください。</Text>
           <Text style={styles.label}>答えの色</Text>
           {ColorChooser}
@@ -256,7 +264,11 @@ export function ImportWizard() {
       )}
 
       {phase === "review" && result && (
-        <ScrollView contentContainerStyle={styles.pad}>
+        <ScrollView
+          contentContainerStyle={styles.pad}
+          automaticallyAdjustKeyboardInsets
+          keyboardShouldPersistTaps="handled"
+        >
           <Text style={styles.detected}>{result.clozes.length} 件の答えを検出</Text>
           <Text style={styles.muted}>
             {result.pageCount} ページ

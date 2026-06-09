@@ -321,6 +321,8 @@ function GenerateTab({
         numColumns={3}
         columnWrapperStyle={styles.pickerRow}
         contentContainerStyle={styles.pickerContent}
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
         ListHeaderComponent={header}
         renderItem={({ item: p }) => (
           <PageCard

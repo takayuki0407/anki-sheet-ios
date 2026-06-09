@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -68,7 +69,13 @@ export function Login() {
       <Pressable onPress={() => setView({ name: "decks" })} hitSlop={10}>
         <Text style={styles.back}>← 閉じる</Text>
       </Pressable>
-      <View style={styles.body}>
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.body}
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.title}>ログイン</Text>
         <Text style={styles.lead}>
           ログインすると、ご利用中のサブスクリプションをこの端末に反映できます。
@@ -118,15 +125,16 @@ export function Login() {
             {mode === "in" ? "アカウントを新規作成" : "既存のアカウントでログイン"}
           </Text>
         </Pressable>
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   c: { flex: 1, padding: 20, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   back: { color: colors.ocean, fontSize: 16 },
-  body: { flex: 1, justifyContent: "center", gap: 12 },
+  body: { flexGrow: 1, justifyContent: "center", gap: 12 },
   title: { fontSize: 26, fontWeight: "800", color: colors.text, textAlign: "center" },
   lead: { fontSize: 14, color: colors.textSub, textAlign: "center", lineHeight: 21, marginBottom: 8 },
   notice: { fontSize: 12, color: colors.warning, textAlign: "center" },

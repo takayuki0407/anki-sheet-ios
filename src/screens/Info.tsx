@@ -207,7 +207,11 @@ export function Info() {
         <View style={{ width: 48 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.pad}>
+      <ScrollView
+        contentContainerStyle={styles.pad}
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
+      >
         <Section title="使い方">
           <Help
             q="Kiokumate（キオクメイト）とは？"
