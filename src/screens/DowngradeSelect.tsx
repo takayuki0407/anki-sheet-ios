@@ -20,6 +20,7 @@ import { downloadDeck, localBookIds } from "../sync/deck";
 import { listBooks, submitTrim, updateBookMeta, type AccountBook } from "../sync/api";
 import { deviceLabel } from "../sync/device";
 import { exportBackup } from "../db/backup";
+import { DevTierSwitch } from "../components/DevTierSwitch";
 import { colors } from "../ui/theme";
 
 export function DowngradeSelect({
@@ -178,6 +179,7 @@ export function DowngradeSelect({
             <Text style={styles.primaryText}>選んだ {target} 冊を残す</Text>
           )}
         </Pressable>
+        <DevTierSwitch />
       </View>
     </View>
   );

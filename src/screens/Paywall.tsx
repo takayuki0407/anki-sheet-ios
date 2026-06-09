@@ -6,9 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import type { PurchasesPackage } from "react-native-purchases";
 import { useApp } from "../store/session";
-import { STANDARD_DECK_LIMIT, useEntitlements, type Tier } from "../iap/entitlements";
+import { STANDARD_DECK_LIMIT } from "../iap/entitlements";
 import { getCurrentOffering, purchase, restore } from "../iap/purchases";
 import { useAccount } from "../auth/account";
+import { DevTierSwitch } from "../components/DevTierSwitch";
 import { PRIVACY_URL, TERMS_URL } from "../config";
 import { colors } from "../ui/theme";
 
@@ -141,39 +142,7 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
           </Pressable>
         ) : null}
 
-        {__DEV__ ? <DevTierPanel /> : null}
-      </View>
-    </View>
-  );
-}
-
-/** DEV-only: simulate a subscription tier to exercise the gates (lock / downgrade) in Expo Go. */
-function DevTierPanel() {
-  const set = useEntitlements((s) => s.set);
-  const setView = useApp((s) => s.setView);
-  const sim = (tier: Tier, billingActive: boolean) => {
-    set({ tier, billingActive, ready: true });
-    setView({ name: "decks" });
-  };
-  return (
-    <View style={styles.dev}>
-      <Text style={styles.devLabel}>[DEV] tier 切替</Text>
-      <View style={styles.devRow}>
-        <Pressable style={styles.devBtn} onPress={() => sim("premium", true)}>
-          <Text style={styles.devBtnText}>Premium</Text>
-        </Pressable>
-        <Pressable style={styles.devBtn} onPress={() => sim("pro", true)}>
-          <Text style={styles.devBtnText}>Pro</Text>
-        </Pressable>
-        <Pressable style={styles.devBtn} onPress={() => sim("standard", true)}>
-          <Text style={styles.devBtnText}>Standard</Text>
-        </Pressable>
-        <Pressable style={styles.devBtn} onPress={() => sim("free", true)}>
-          <Text style={styles.devBtnText}>Free</Text>
-        </Pressable>
-        <Pressable style={styles.devBtn} onPress={() => sim("free", false)}>
-          <Text style={styles.devBtnText}>解除(ungate)</Text>
-        </Pressable>
+        <DevTierSwitch />
       </View>
     </View>
   );
@@ -212,16 +181,4 @@ const styles = StyleSheet.create({
   legalRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 4 },
   legalLink: { color: colors.ocean, fontSize: 12 },
   legalSep: { color: colors.muted, fontSize: 12 },
-  dev: { marginTop: 10, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, gap: 6 },
-  devLabel: { color: colors.muted, fontSize: 11, textAlign: "center" },
-  devRow: { flexDirection: "row", justifyContent: "center", gap: 6, flexWrap: "wrap" },
-  devBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  devBtnText: { color: colors.text, fontSize: 12 },
 });

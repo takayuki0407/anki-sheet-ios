@@ -15,6 +15,7 @@ import {
 import * as StoreReview from "expo-store-review";
 import { useApp } from "../store/session";
 import { FREE_DECK_LIMIT, STANDARD_DECK_LIMIT, effectiveTier, useEntitlements } from "../iap/entitlements";
+import { DevTierSwitch } from "../components/DevTierSwitch";
 import { deckCountTotal } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
 import { restore } from "../iap/purchases";
@@ -263,6 +264,7 @@ export function Info() {
             onPress={() => Linking.openURL(MANAGE_SUBSCRIPTIONS_URL)}
           />
           <Row label="購入を復元" onPress={doRestore} />
+          <DevTierSwitch />
         </Section>
 
         <Section title="アカウント">
