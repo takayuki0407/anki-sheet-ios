@@ -3,6 +3,7 @@
 // endpoints use fetch here; the PDF blob (binary) is uploaded/downloaded via expo-file-system in
 // sync/deck.ts (RN can't build a Blob from a file the way the web does).
 import { getFirebaseAuth } from "../auth/firebase";
+import type { ProgressBlob } from "./progressMerge";
 
 export const SYNC_BASE = "https://anki-sheet.pages.dev/api/sync";
 
@@ -156,18 +157,10 @@ export async function getContent(bookId: string): Promise<unknown> {
   return res.json();
 }
 
-// Progress sync (device-independent fields + revealed as portable keys; same shape as web).
-export interface ProgressData {
-  lastPage?: number;
-  lastMode?: "scroll" | "paged";
-  redMode?: "mask" | "sheet" | "off";
-  sheetBand?: { top: number; height: number };
-  revealedKeys?: string[];
-  /** Starred answers as portable keys (★ review) — synced cross-device like revealedKeys. */
-  starredKeys?: string[];
-  /** User bookmarks (しおり) — device-independent, synced cross-device (last-write-wins). */
-  bookmarks?: { title: string; pageIndex: number }[];
-}
+// Progress sync. The wire shape IS the merge blob: position fields + ★/しおり element-sets
+// (starsLww/bmLww) with per-key tombstones, merged per-key on the server (改修案 §4.2). Legacy
+// starredKeys/bookmarks arrays are still accepted/folded for old clients.
+export type ProgressData = ProgressBlob;
 
 export async function getProgress(
   bookId: string,

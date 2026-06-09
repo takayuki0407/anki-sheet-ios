@@ -39,6 +39,17 @@ import {
 import type { BookmarkRow, CardRow, ReadMode } from "../db/rows";
 import type { Rect } from "../types";
 import { getProgress, idToken, putProgress } from "../sync/api";
+import {
+  type StarMap,
+  type BmMap,
+  normalize,
+  mergeBlobs,
+  activeStarKeys,
+  activeBookmarks,
+  setActiveStars,
+  addBm as bmAdd,
+  removeBm as bmRemove,
+} from "../sync/progressMerge";
 import { deckBookId, refreshContent, uploadContent } from "../sync/deck";
 import { colors } from "../ui/theme";
 
@@ -121,6 +132,8 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const progressAtRef = useRef(0);
   const pmRef = useRef<{ page: number; mode: ReadMode }>({ page: 0, mode: "scroll" });
   const starredRef = useRef<number[]>([]); // latest starred ids for the debounced progress push
+  const starMapRef = useRef<StarMap>({}); // ★ LWW-element-set (key -> {t,d}) for §4.2 merge sync
+  const bmMapRef = useRef<BmMap>({}); // しおり LWW-element-set
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -142,10 +155,12 @@ export function PageViewer({ deckId }: { deckId: number }) {
         // signed-out / offline / no-change just keeps the local set).
         await refreshContent(deckId).catch(() => {});
         if (!alive) return;
-        const [cards, revealRaw, starRaw] = await Promise.all([
+        const [cards, revealRaw, starRaw, starsLwwRaw, bmLwwRaw] = await Promise.all([
           deckCards(deckId),
           getMeta(`reveal:${deckId}`),
           getMeta(`star:${deckId}`),
+          getMeta(`starsLww:${deckId}`),
+          getMeta(`bmLww:${deckId}`),
         ]);
         if (!alive) return;
         let startPage = deck.lastPage ?? (await firstAnswerPage(deckId));
@@ -180,37 +195,75 @@ export function PageViewer({ deckId }: { deckId: number }) {
         cardsRef.current = cards;
         bookIdRef.current = await deckBookId(deckId);
         progressAtRef.current = Number(await getMeta(`progressAt:${deckId}`)) || 0;
-        // Pro cross-device progress: if the cloud copy is newer, resume from it (position / mode /
-        // red-sheet / revealed). Fail-open: signed-out or offline just keeps the local state.
+        const { idToKey, keyToId } = cardKeyMaps(cards);
+        const toIds = (keys: string[]) =>
+          keys.map((k) => keyToId.get(k)).filter((x): x is number => x != null);
+        const toKeys = (ids: number[]) =>
+          ids.map((i) => idToKey.get(i)).filter((x): x is string => !!x);
+        // ★・しおり sync as LWW-element-sets (§4.2): per-key tombstones so a delete on one device
+        // isn't undone by another's stale set. Load the local maps; seed them (stamped "now", so the
+        // user's existing local picks survive migration) for pre-§4.2 installs that only have the old
+        // id-array / bookmark table.
+        let starMap: StarMap = {};
+        let bmMap: BmMap = {};
+        try {
+          if (starsLwwRaw) starMap = JSON.parse(starsLwwRaw) as StarMap;
+        } catch {
+          /* ignore corrupt map */
+        }
+        try {
+          if (bmLwwRaw) bmMap = JSON.parse(bmLwwRaw) as BmMap;
+        } catch {
+          /* ignore corrupt map */
+        }
+        const seedAt = Date.now();
+        if (!starsLwwRaw && savedStarred.length) setActiveStars(starMap, toKeys(savedStarred), seedAt);
+        if (!bmLwwRaw)
+          for (const b of await listBookmarks(deckId)) bmAdd(bmMap, b.title, b.pageIndex, seedAt);
+        // Pro cross-device progress: MERGE the cloud blob into our local one (position resolves by
+        // posAt; ★・しおり per-key LWW). Fail-open: signed-out / offline just keeps local.
         if (bookIdRef.current && (await idToken())) {
           const cloud = await getProgress(bookIdRef.current).catch(() => null);
-          if (alive && cloud && cloud.updatedAt > progressAtRef.current) {
-            const c = cloud.data;
-            if (typeof c.lastPage === "number")
-              startPage = Math.max(0, Math.min(pdf.pageCount - 1, c.lastPage));
-            if (c.lastMode) startMode = c.lastMode;
-            if (c.redMode) savedMode = c.redMode;
-            if (c.sheetBand) savedBand = c.sheetBand;
-            if (c.revealedKeys || c.starredKeys) {
-              const { keyToId } = cardKeyMaps(cards);
-              const toIds = (keys: string[]) =>
-                keys.map((k) => keyToId.get(k)).filter((x): x is number => x != null);
-              if (c.revealedKeys) savedRevealed = toIds(c.revealedKeys);
-              if (c.starredKeys) {
-                savedStarred = toIds(c.starredKeys);
-                void setMeta(`star:${deckId}`, JSON.stringify(savedStarred));
-              }
-            }
-            if (c.bookmarks) void replaceBookmarks(deckId, c.bookmarks).catch(() => {});
-            progressAtRef.current = cloud.updatedAt;
+          if (alive && cloud) {
+            const localNorm = normalize(
+              {
+                lastPage: startPage,
+                lastMode: startMode,
+                redMode: savedMode,
+                sheetBand: savedBand,
+                revealedKeys: toKeys(savedRevealed),
+                posAt: progressAtRef.current,
+                starsLww: starMap,
+                bmLww: bmMap,
+              },
+              seedAt,
+            );
+            const merged = mergeBlobs(localNorm, normalize(cloud.data, cloud.updatedAt));
+            starMap = merged.starsLww ?? {};
+            bmMap = merged.bmLww ?? {};
+            if (typeof merged.lastPage === "number")
+              startPage = Math.max(0, Math.min(pdf.pageCount - 1, merged.lastPage));
+            if (merged.lastMode) startMode = merged.lastMode;
+            if (merged.redMode) savedMode = merged.redMode;
+            if (merged.sheetBand) savedBand = merged.sheetBand;
+            if (merged.revealedKeys) savedRevealed = toIds(merged.revealedKeys);
+            savedStarred = toIds(activeStarKeys(merged));
+            progressAtRef.current = merged.posAt ?? progressAtRef.current;
+            void replaceBookmarks(deckId, activeBookmarks(merged)).catch(() => {});
+            void setMeta(`star:${deckId}`, JSON.stringify(savedStarred));
             void updateDeck(deckId, { lastPage: startPage, lastMode: startMode });
             void setMeta(
               `reveal:${deckId}`,
               JSON.stringify({ revealed: savedRevealed, redMode: savedMode, band: savedBand }),
             );
-            void setMeta(`progressAt:${deckId}`, String(cloud.updatedAt));
+            void setMeta(`progressAt:${deckId}`, String(progressAtRef.current));
           }
         }
+        // Persist the (seeded or merged) maps; refs feed the debounced push + on-close push.
+        starMapRef.current = starMap;
+        bmMapRef.current = bmMap;
+        void setMeta(`starsLww:${deckId}`, JSON.stringify(starMap));
+        void setMeta(`bmLww:${deckId}`, JSON.stringify(bmMap));
         revealStateRef.current = { revealed: savedRevealed, redMode: savedMode, band: savedBand };
         pmRef.current = { page: startPage, mode: startMode };
         const cardsUrl = stageJson(
@@ -262,7 +315,6 @@ export function PageViewer({ deckId }: { deckId: number }) {
       if (!(await idToken())) return;
       const { idToKey } = cardKeyMaps(cardsRef.current);
       const toKeys = (ids: number[]) => ids.map((i) => idToKey.get(i)).filter((x): x is string => !!x);
-      const bms = await listBookmarks(deckId);
       const at = Date.now();
       progressAtRef.current = at;
       void setMeta(`progressAt:${deckId}`, String(at));
@@ -272,8 +324,9 @@ export function PageViewer({ deckId }: { deckId: number }) {
         redMode: revealStateRef.current.redMode,
         sheetBand: revealStateRef.current.band,
         revealedKeys: toKeys(revealStateRef.current.revealed),
-        starredKeys: toKeys(starredRef.current),
-        bookmarks: bms.map((b) => ({ title: b.title, pageIndex: b.pageIndex })),
+        posAt: at,
+        starsLww: starMapRef.current,
+        bmLww: bmMapRef.current,
       }).catch(() => {});
     }, 1600);
   }, [deckId]);
@@ -350,16 +403,17 @@ export function PageViewer({ deckId }: { deckId: number }) {
         const { idToKey } = cardKeyMaps(cardsRef.current);
         const toKeys = (ids: number[]) =>
           ids.map((i) => idToKey.get(i)).filter((x): x is string => !!x);
-        const bms = await listBookmarks(deckId);
-        void setMeta(`progressAt:${deckId}`, String(Date.now()));
+        const at = Date.now();
+        void setMeta(`progressAt:${deckId}`, String(at));
         void putProgress(bookIdRef.current!, {
           lastPage: page,
           lastMode: mode,
           redMode: revealStateRef.current.redMode,
           sheetBand: revealStateRef.current.band,
           revealedKeys: toKeys(revealStateRef.current.revealed),
-          starredKeys: toKeys(starredRef.current),
-          bookmarks: bms.map((b) => ({ title: b.title, pageIndex: b.pageIndex })),
+          posAt: at,
+          starsLww: starMapRef.current,
+          bmLww: bmMapRef.current,
         }).catch(() => {});
       })();
     }
@@ -488,7 +542,15 @@ export function PageViewer({ deckId }: { deckId: number }) {
       setStarred(new Set(all));
       starredRef.current = all;
       void setMeta(`star:${deckId}`, JSON.stringify(all));
-      pushProgress(); // sync ★ cross-device (portable keys, last-write-wins)
+      // Reconcile the ★ LWW map toward the new live set (per-key add/tombstone) for §4.2 merge sync.
+      const { idToKey } = cardKeyMaps(cardsRef.current);
+      setActiveStars(
+        starMapRef.current,
+        all.map((i) => idToKey.get(i)).filter((x): x is string => !!x),
+        Date.now(),
+      );
+      void setMeta(`starsLww:${deckId}`, JSON.stringify(starMapRef.current));
+      pushProgress(); // sync ★ cross-device (LWW-element-set)
     },
     [deckId, pushProgress],
   );
@@ -510,8 +572,10 @@ export function PageViewer({ deckId }: { deckId: number }) {
       async (text) => {
         const title = (text ?? "").trim() || `${page + 1}ページ`;
         await addBookmark(deckId, page, title);
+        bmAdd(bmMapRef.current, title, page, Date.now());
+        void setMeta(`bmLww:${deckId}`, JSON.stringify(bmMapRef.current));
         setBookmarks(await listBookmarks(deckId));
-        pushProgress(); // sync しおり cross-device
+        pushProgress(); // sync しおり cross-device (LWW-element-set)
       },
       "plain-text",
       `${page + 1}ページ`,
@@ -527,6 +591,11 @@ export function PageViewer({ deckId }: { deckId: number }) {
           const title = (text ?? "").trim();
           if (!title) return;
           await renameBookmark(b.id, title);
+          // Rename = tombstone the old key + add the new (title is part of the bmKey).
+          const now = Date.now();
+          bmRemove(bmMapRef.current, b.title, b.pageIndex, now);
+          bmAdd(bmMapRef.current, title, b.pageIndex, now);
+          void setMeta(`bmLww:${deckId}`, JSON.stringify(bmMapRef.current));
           setBookmarks(await listBookmarks(deckId));
           pushProgress();
         },
@@ -539,11 +608,16 @@ export function PageViewer({ deckId }: { deckId: number }) {
 
   const removeBm = useCallback(
     async (id: number) => {
+      const row = bookmarks.find((b) => b.id === id);
       await deleteBookmark(id);
+      if (row) {
+        bmRemove(bmMapRef.current, row.title, row.pageIndex, Date.now()); // tombstone for §4.2 sync
+        void setMeta(`bmLww:${deckId}`, JSON.stringify(bmMapRef.current));
+      }
       setBookmarks(await listBookmarks(deckId));
       pushProgress();
     },
-    [deckId, pushProgress],
+    [deckId, pushProgress, bookmarks],
   );
 
   const percent = pageCount > 0 ? Math.round(((page + 1) / pageCount) * 100) : 0;
