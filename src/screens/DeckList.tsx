@@ -149,16 +149,15 @@ export function DeckList() {
       );
       const me = deviceLabel();
       const singleHome = !acct.unlimited; // Standard/Free: a book lives on ONE device (the holder)
-      // Cloud section = ACTIVE account books not on this device.
-      //  • Pro+ (sync): every active book not held locally (downloadable/restore, incl. zero-holder).
-      //  • Standard/Free (non-sync): ONLY books held by ANOTHER device (`device` set, ≠ me) — so a
-      //    size=0 device-only book can be cleared from here to free the slot. Zero-holder/retained
-      //    books are NOT shown (nothing to download; managed from the bookshelf).
+      // Cloud section = every ACTIVE account book NOT on this device, for BOTH tiers — including
+      // zero-holder books (`device == null`, e.g. a Pro local-delete that left it cloud-only, or a
+      // failed trim download). Those aren't on any bookshelf, so this is the ONLY place to free their
+      // account slot on a non-sync tier; gating on `device` would strand them. A self-deleted book
+      // never flashes here (retain → non-active, plus removeFromCloud). Download stays Pro-only + size>0.
       setCloud(
         acct.books.filter((b) => {
           if (!active.has(b.book_id) || local.has(b.book_id)) return false;
-          if (acct.unlimited) return true;
-          return !!b.device && b.device !== me;
+          return true;
         }),
       );
       setCloudPro(acct.unlimited); // cloud download/restore is Pro/admin-only
@@ -262,16 +261,17 @@ export function DeckList() {
     );
   }, []);
 
-  // Standard/Free : single action — free the account slot another device is holding. size>0 → retain
-  // (frees the slot, keeps R2 for re-Pro restore); size=0 → unregister (permanent). Always confirms,
-  // warns harder when there's no cloud copy, and defaults focus to キャンセル (style:"cancel").
+  // Standard/Free : single action — free the account slot. size>0 → retain (frees the slot, keeps R2
+  // for re-Pro restore); size=0 → unregister (permanent). Wording adapts to whether a holder device is
+  // known (another device) or not (zero-holder, cloud-only). Defaults focus to キャンセル (style:"cancel").
   const onReleaseCloud = useCallback((b: AccountBook) => {
     const hasBlob = b.size > 0;
-    const where = b.device ? `「${b.device}」` : "別の端末";
     const title = b.name || "（無題）";
-    const msg = hasBlob
-      ? `${where}に保存中の「${title}」を削除して枠を空けます。\nProに戻すと復元できます（保持〜約6ヶ月）。`
-      : `${where}に保存中の「${title}」を削除して枠を空けます。\n⚠ クラウドに保存がないため、削除すると復元できません。`;
+    const msg = !hasBlob
+      ? `「${title}」を削除して枠を空けます。\n⚠ クラウドに保存がないため、削除すると復元できません。`
+      : b.device
+        ? `「${b.device}」に保存中の「${title}」を枠から外します。\nクラウドに退避し、Proに戻すと復元できます（保持〜約6ヶ月）。`
+        : `「${title}」をクラウドから外して枠を空けます。\nProに戻すと復元できます（保持〜約6ヶ月）。`;
     Alert.alert("枠を空けますか?", msg, [
       { text: "キャンセル", style: "cancel" },
       {
@@ -653,7 +653,7 @@ export function DeckList() {
                 <Text style={styles.cloudNote}>
                   {cloudPro
                     ? "同じアカウントの本です。「取り込む」で追加、「クラウドから完全に削除」ですべての端末から削除します。"
-                    : "他の端末にある本です。各本の「…から削除」で、この端末のアカウント枠を空けられます。クラウド保存がある本はProに戻すと復元できますが、ない本（端末のみ）は復元できません。"}
+                    : "同じアカウントの、この端末にない本です。各本の「枠を空ける」でアカウントの枠を解放できます。クラウド保存がある本はProに戻すと復元できますが、ない本は復元できません。"}
                 </Text>
                 {cloud.map((b) => (
                   <View key={b.book_id} style={styles.cloudRow}>
@@ -666,7 +666,7 @@ export function DeckList() {
                           {b.size > 0 ? "☁️ クラウドあり" : "端末のみ（復元不可）"}
                         </Text>
                         <Text style={styles.cloudDevice}>
-                          {b.device ? `「${b.device}」に保存` : "クラウドのみ"}
+                          {b.device ? `「${b.device}」に保存` : "クラウドのみ（端末未保存）"}
                         </Text>
                       </View>
                     </View>
@@ -690,7 +690,7 @@ export function DeckList() {
                     ) : (
                       <Pressable style={styles.cloudDeleteBtn} onPress={() => onReleaseCloud(b)}>
                         <Text style={styles.cloudDeleteText}>
-                          {b.device ? `「${b.device}」から削除` : "削除して枠を空ける"}
+                          {b.device ? `「${b.device}」から削除` : "クラウドから外す"}
                         </Text>
                       </Pressable>
                     )}
