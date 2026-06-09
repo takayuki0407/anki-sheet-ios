@@ -102,6 +102,10 @@ export function DeckList() {
   // slot, or it lingers as a phantom that counts toward the cap and can't be restored.
   const cloudBlobIdsRef = useRef<Set<string>>(new Set());
   const cloudReadyRef = useRef(false);
+  // Per-deck cloud-backed status for the bookshelf badge + delete warning: deckIds whose account book
+  // has a cloud copy (size>0). cloudKnown=false until the first successful listBooks (→ warn safe-side).
+  const [cloudBackedDecks, setCloudBackedDecks] = useState<Set<number>>(new Set());
+  const [cloudKnown, setCloudKnown] = useState(false);
 
   const load = useCallback(async () => {
     const decks = await listDecks();
@@ -125,6 +129,16 @@ export function DeckList() {
         acct.books.filter((b) => b.size > 0).map((b) => b.book_id),
       );
       cloudReadyRef.current = true;
+      // Per-deck cloud-backed set (size>0 → restorable) for the bookshelf badge + delete warning.
+      const backed = new Set<number>();
+      for (const b of acct.books) {
+        if (b.size > 0) {
+          const did = local.get(b.book_id);
+          if (did != null) backed.add(did);
+        }
+      }
+      setCloudBackedDecks(backed);
+      setCloudKnown(true);
       const known = new Set(acct.books.map((b) => b.book_id));
       const active = new Set(
         acct.books.filter((b) => (b.status ?? "active") === "active").map((b) => b.book_id),
@@ -390,9 +404,16 @@ export function DeckList() {
 
   const confirmDelete = useCallback(
     (deck: DeckRow) => {
+      // Warn based on whether the account has a cloud copy (size>0). Device-only books (or
+      // unknown/offline → safe side) are UNRECOVERABLE; cloud-backed books restore on re-Pro.
+      const backed = cloudKnown ? cloudBackedDecks.has(deck.id) : null;
+      const msg =
+        backed === true
+          ? `「${deck.name}」をこの端末から削除します。\nこの本はクラウドにバックアップがあります。Proに戻せば、あとで「クラウド」から取り込み直せます。`
+          : `「${deck.name}」をこの端末から削除します。\n⚠ この本は端末内だけにあります。削除すると復元できません。`;
       Alert.alert(
         "この端末から削除しますか?",
-        `「${deck.name}」をこの端末から削除します。クラウドに保存されている本は、あとで「クラウド」から取り込み直せます。`,
+        msg,
         [
           { text: "キャンセル", style: "cancel" },
           {
@@ -418,7 +439,7 @@ export function DeckList() {
         ],
       );
     },
-    [load, loadCloud],
+    [load, loadCloud, cloudKnown, cloudBackedDecks],
   );
 
   const onLongPress = useCallback(
@@ -441,6 +462,17 @@ export function DeckList() {
 
   const cols = COLS[viewMode];
   const sorted = items ? sortItems(items, sortMode) : null;
+
+  // true = account has a cloud copy (restorable on re-Pro); false = device-only (delete = permanent);
+  // null = unknown (offline / not yet fetched) → no badge, and the delete warning errs safe-side.
+  const cloudBackedOf = (deckId: number): boolean | null =>
+    cloudKnown ? cloudBackedDecks.has(deckId) : null;
+  const cloudBadge = (deckId: number) => {
+    const b = cloudBackedOf(deckId);
+    if (b === true) return <Text style={styles.badgeCloud}>☁️ クラウドあり</Text>;
+    if (b === false) return <Text style={styles.badgeLocal}>端末のみ</Text>;
+    return null;
+  };
 
   const renderGrid = ({ item }: { item: DeckVM }) => (
     <Pressable
@@ -466,6 +498,7 @@ export function DeckList() {
         {item.deck.name}
       </Text>
       <Text style={styles.cardCount}>{item.count} 問</Text>
+      {cloudBadge(item.deck.id)}
     </Pressable>
   );
 
@@ -486,7 +519,10 @@ export function DeckList() {
         <Text style={styles.listName} numberOfLines={1}>
           {item.deck.name}
         </Text>
-        <Text style={styles.cardCount}>{item.count} 問</Text>
+        <View style={styles.listMetaRow}>
+          <Text style={styles.cardCount}>{item.count} 問</Text>
+          {cloudBadge(item.deck.id)}
+        </View>
       </View>
       <Pressable style={styles.favBadgeList} onPress={() => toggleFavorite(item.deck)} hitSlop={8}>
         <Text style={[styles.favStar, item.favorite && styles.favStarOn]}>
@@ -655,6 +691,29 @@ const styles = StyleSheet.create({
   favStarOn: { color: colors.sand },
   cardName: { marginTop: 6, fontSize: 13, fontWeight: "600", color: colors.text },
   cardCount: { fontSize: 12, color: colors.textSub },
+  listMetaRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  badgeCloud: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#2a6f97",
+    backgroundColor: "#e3f0f7",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 7,
+    overflow: "hidden",
+    marginTop: 2,
+  },
+  badgeLocal: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#9a6a00",
+    backgroundColor: "#fbf0d9",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 7,
+    overflow: "hidden",
+    marginTop: 2,
+  },
   listRow: {
     flexDirection: "row",
     alignItems: "center",
