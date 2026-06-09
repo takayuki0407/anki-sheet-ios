@@ -51,32 +51,10 @@ import {
   removeBm as bmRemove,
 } from "../sync/progressMerge";
 import { deckBookId, refreshContent, uploadContent } from "../sync/deck";
+import { cardKeyMaps } from "../sync/cardKeys";
 import { colors } from "../ui/theme";
 
 type FitMode = "width" | "page";
-
-/** Device-portable reveal keys (pageIndex:ordinal, ordinal = position-sorted index on the page) —
- * identical across devices for the same detected book, so revealed answers map despite local ids. */
-function cardKeyMaps(cards: CardRow[]) {
-  const byPage = new Map<number, CardRow[]>();
-  for (const c of cards) {
-    const arr = byPage.get(c.pageIndex) ?? [];
-    arr.push(c);
-    byPage.set(c.pageIndex, arr);
-  }
-  const idToKey = new Map<number, string>();
-  const keyToId = new Map<string, number>();
-  for (const [page, list] of byPage) {
-    [...list]
-      .sort((a, b) => a.answerRect.y - b.answerRect.y || a.answerRect.x - b.answerRect.x)
-      .forEach((c, i) => {
-        const key = `${page}:${i}`;
-        idToKey.set(c.id, key);
-        keyToId.set(key, c.id);
-      });
-  }
-  return { idToKey, keyToId };
-}
 
 /** Do two page-coordinate rects overlap? (used by 範囲一括削除). */
 function rectsOverlap(a: Rect, b: Rect): boolean {
@@ -217,7 +195,13 @@ export function PageViewer({ deckId }: { deckId: number }) {
           /* ignore corrupt map */
         }
         const seedAt = Date.now();
-        if (!starsLwwRaw && savedStarred.length) setActiveStars(starMap, toKeys(savedStarred), seedAt);
+        // The ★ key scheme changed from ordinal to position (§4.4); an old map has 2-part keys
+        // ("5:1"). Treat it as legacy and rebuild from the local id set so ★ survive the upgrade.
+        const starLegacy = Object.keys(starMap).some((k) => k.split(":").length < 3);
+        if (!starsLwwRaw || starLegacy) {
+          starMap = {};
+          setActiveStars(starMap, toKeys(savedStarred), seedAt);
+        }
         if (!bmLwwRaw)
           for (const b of await listBookmarks(deckId)) bmAdd(bmMap, b.title, b.pageIndex, seedAt);
         // Pro cross-device progress: MERGE the cloud blob into our local one (position resolves by
@@ -246,7 +230,12 @@ export function PageViewer({ deckId }: { deckId: number }) {
             if (merged.lastMode) startMode = merged.lastMode;
             if (merged.redMode) savedMode = merged.redMode;
             if (merged.sheetBand) savedBand = merged.sheetBand;
-            if (merged.revealedKeys) savedRevealed = toIds(merged.revealedKeys);
+            if (merged.revealedKeys) {
+              // Keep local reveals when the cloud set is non-empty but fully unresolvable (legacy
+              // ordinal keys after the §4.4 key change) — don't let it wipe them.
+              const rids = toIds(merged.revealedKeys);
+              if (merged.revealedKeys.length === 0 || rids.length > 0) savedRevealed = rids;
+            }
             savedStarred = toIds(activeStarKeys(merged));
             progressAtRef.current = merged.posAt ?? progressAtRef.current;
             void replaceBookmarks(deckId, activeBookmarks(merged)).catch(() => {});

@@ -6,6 +6,8 @@ import { DEFAULT_MAGENTA_BAND, type DeckColorConfig, type DetectedCloze, type Re
 import type { BookmarkRow, CardRow, DeckRow, PdfRow, QuestionRow, ReadMode } from "./rows";
 import { getDb, withWriteLock } from "./database";
 import { deckPdfFile, deleteDeckPdf, savePdfForDeck } from "./files";
+import { cardKey, correspondCards } from "../sync/cardKeys";
+import { setActiveStars, type StarMap } from "../sync/progressMerge";
 
 export interface ImportParams {
   name: string;
@@ -219,7 +221,9 @@ export async function updateDeck(deckId: number, patch: DeckPatch): Promise<void
   await db.runAsync(`UPDATE decks SET ${sets.join(", ")} WHERE id = ?`, params);
 }
 
-/** Re-run detection for a deck under a new color config: replace all its answers. */
+/** Re-run detection for a deck under a new color config: replace all its answers. Re-detection makes
+ * NEW card ids (and may change which/where answers are), so ★・revealed (stored as local card ids)
+ * are carried over to the replaced cards by geometric overlap; unmatched answers are dropped (§4.4). */
 export async function redetectDeck(
   deckId: number,
   color: DeckColorConfig,
@@ -228,6 +232,7 @@ export async function redetectDeck(
   return withWriteLock(async () => {
     const db = await getDb();
     const now = Date.now();
+    const oldCards = await deckCards(deckId); // snapshot positions for ★/revealed carry-over
     let count = 0;
     await db.withTransactionAsync(async () => {
       await db.runAsync("UPDATE decks SET color = ? WHERE id = ?", [JSON.stringify(color), deckId]);
@@ -240,8 +245,66 @@ export async function redetectDeck(
       await insertCards(db, deckId, pdf.id, clozes, now);
       count = clozes.length;
     });
+    const newCards = await deckCards(deckId); // new ids after re-insert
+    await carryStarsRevealedOnRedetect(deckId, oldCards, newCards, now);
     return count;
   });
+}
+
+/** After a re-detect replaces a deck's cards, move ★/revealed (local card ids, in meta) onto the new
+ * cards by geometric overlap, and re-anchor the ★ LWW map to the new position keys (§4.4). */
+async function carryStarsRevealedOnRedetect(
+  deckId: number,
+  oldCards: CardRow[],
+  newCards: CardRow[],
+  now: number,
+): Promise<void> {
+  const corr = correspondCards(oldCards, newCards);
+  const remap = (ids: number[]) =>
+    ids.map((id) => corr.get(id)).filter((x): x is number => x != null);
+  const parseNums = (s?: string): number[] => {
+    try {
+      const v = JSON.parse(s ?? "[]") as unknown;
+      return Array.isArray(v) ? (v as number[]) : [];
+    } catch {
+      return [];
+    }
+  };
+  // ★ ids
+  const starRaw = await getMeta(`star:${deckId}`);
+  const newStarred = remap(parseNums(starRaw));
+  if (starRaw !== undefined) await setMeta(`star:${deckId}`, JSON.stringify(newStarred));
+  // revealed (stored inside reveal:{revealed,redMode,band})
+  const revRaw = await getMeta(`reveal:${deckId}`);
+  if (revRaw) {
+    try {
+      const o = JSON.parse(revRaw) as { revealed?: number[] };
+      if (Array.isArray(o.revealed)) {
+        o.revealed = remap(o.revealed);
+        await setMeta(`reveal:${deckId}`, JSON.stringify(o));
+      }
+    } catch {
+      /* ignore corrupt reveal state */
+    }
+  }
+  // ★ LWW map: re-anchor to the carried-over stars' new position keys (stale keys -> inert tombstones).
+  const lwwRaw = await getMeta(`starsLww:${deckId}`);
+  if (lwwRaw !== undefined || newStarred.length) {
+    let starMap: StarMap = {};
+    try {
+      const m = JSON.parse(lwwRaw ?? "{}") as unknown;
+      if (m && typeof m === "object") starMap = m as StarMap;
+    } catch {
+      /* ignore corrupt map */
+    }
+    const byId = new Map(newCards.map((c) => [c.id, c] as const));
+    setActiveStars(
+      starMap,
+      newStarred.map((id) => cardKey(byId.get(id)!.pageIndex, byId.get(id)!.answerRect)),
+      now,
+    );
+    await setMeta(`starsLww:${deckId}`, JSON.stringify(starMap));
+  }
 }
 
 /** Lowest page index that has any answer (so the viewer opens on a useful page). */
