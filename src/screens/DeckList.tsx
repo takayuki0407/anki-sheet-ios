@@ -688,8 +688,8 @@ export function DeckList() {
                         </Pressable>
                       </>
                     ) : (
-                      <Pressable style={styles.cloudBtn} onPress={() => onReleaseCloud(b)}>
-                        <Text style={styles.cloudBtnText}>
+                      <Pressable style={styles.cloudDeleteBtn} onPress={() => onReleaseCloud(b)}>
+                        <Text style={styles.cloudDeleteText}>
                           {b.device ? `「${b.device}」から削除` : "削除して枠を空ける"}
                         </Text>
                       </Pressable>
@@ -839,6 +839,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   cloudBtnText: { color: colors.ocean, fontSize: 13, fontWeight: "600" },
-  cloudDeleteBtn: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
+  // Outlined destructive button: visible border + surface bg + red text (mirrors web .btn.danger-outline)
+  // so a delete reads as a pressable button, not bare red text.
+  cloudDeleteBtn: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: "#e0a99f",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
   cloudDeleteText: { color: "#c0392b", fontSize: 13, fontWeight: "600" },
 });
