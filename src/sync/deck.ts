@@ -32,6 +32,35 @@ import {
 import { deviceLabel } from "./device";
 import type { DeckColorConfig, DetectedCloze } from "../types";
 
+// §2.2(a) Offline import enforcement: each sync caches the account's used/total slots; when offline
+// we block import on this LAST-SEEN server quota instead of the local deck count. A stale cache errs
+// toward blocking (never a bypass); the paid value (sync/AI/storage) is server-gated regardless.
+export interface QuotaCache {
+  count: number;
+  limit: number;
+  unlimited: boolean;
+}
+export async function cacheQuota(b: {
+  count: number;
+  limit: number;
+  unlimited: boolean;
+}): Promise<void> {
+  await setMeta(
+    "quotaCache",
+    JSON.stringify({ count: b.count, limit: b.limit, unlimited: b.unlimited }),
+  ).catch(() => {});
+}
+/** The last-seen server quota (or null if we've never synced on this device). */
+export async function cachedQuota(): Promise<QuotaCache | null> {
+  const s = await getMeta("quotaCache");
+  if (!s) return null;
+  try {
+    return JSON.parse(s) as QuotaCache;
+  } catch {
+    return null;
+  }
+}
+
 interface DeckContent {
   name: string;
   color: DeckColorConfig;

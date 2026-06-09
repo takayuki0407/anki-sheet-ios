@@ -28,7 +28,14 @@ import {
   updateBookMeta,
   type AccountBook,
 } from "../sync/api";
-import { backfillCloudIfPro, deckBookId, downloadDeck, localBookIds } from "../sync/deck";
+import {
+  backfillCloudIfPro,
+  cacheQuota,
+  cachedQuota,
+  deckBookId,
+  downloadDeck,
+  localBookIds,
+} from "../sync/deck";
 import { deviceLabel } from "../sync/device";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
@@ -110,6 +117,7 @@ export function DeckList() {
   const loadCloud = useCallback(async () => {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
+      void cacheQuota(acct); // remember the cap for offline import enforcement (§2.2a)
       const known = new Set(acct.books.map((b) => b.book_id));
       const active = new Set(
         acct.books.filter((b) => (b.status ?? "active") === "active").map((b) => b.book_id),
@@ -243,6 +251,7 @@ export function DeckList() {
     // 10 / Pro+ unlimited). Fail open if unreachable — the server re-checks atomically on register.
     try {
       const acct = await listBooks();
+      void cacheQuota(acct);
       if (!acct.unlimited && acct.count >= acct.limit) {
         Alert.alert(
           "上限に達しています",
@@ -255,7 +264,17 @@ export function DeckList() {
         return;
       }
     } catch {
-      /* fail open — offline; the server re-checks on register */
+      // Offline: enforce the LAST-SEEN server quota (§2.2a). Stale cache errs toward blocking; no
+      // cache yet (never synced) falls open and the server re-checks on register.
+      const q = await cachedQuota();
+      if (q && !q.unlimited && q.count >= q.limit) {
+        Alert.alert(
+          "上限に達しています",
+          `本はプランの上限（${q.limit} 冊）に達しています（オフラインのため最後に確認した枠で判定）。オンラインに戻るか、不要な本を削除してください。`,
+          [{ text: "閉じる", style: "cancel" }],
+        );
+        return;
+      }
     }
     setView({ name: "import" });
   }, [setView]);
