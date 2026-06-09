@@ -47,10 +47,11 @@ export interface ContentBlob {
   bookmarks?: { title: string; pageIndex: number }[];
 }
 
-/** Cloze identity = page + quantized bbox top-left. MUST match sync/cardKeys.cardKey(pageIndex,bbox)
- * so a ★ and the answer it sits on share an anchor. */
+/** Cloze identity = page + quantized bbox position AND size. MUST match sync/cardKeys.cardKey so a ★
+ * and the answer it sits on share an anchor. Including w/h avoids key collisions between two answers
+ * whose top-left rounds to the same px on a dense page (which would drop a mask on merge). */
 export function clozeKey(pageIndex: number, bbox: Rect): string {
-  return `${pageIndex}:${Math.round(bbox.y)}:${Math.round(bbox.x)}`;
+  return `${pageIndex}:${Math.round(bbox.y)}:${Math.round(bbox.x)}:${Math.round(bbox.w)}:${Math.round(bbox.h)}`;
 }
 
 /** Live (non-tombstoned) clozes. */
@@ -91,7 +92,15 @@ export function clozeMapFromCards(
 /** Fold a legacy clozes[] array into the map when no map exists yet (old client / GET mirror is
  * ignored once a map is present, so it can't resurrect a tombstone). */
 export function normalizeContent(b: ContentBlob, baseline: number): ContentBlob {
-  const map: ClozeMap = { ...(b.clozesLww ?? {}) };
+  // Re-key every entry to the CANONICAL clozeKey from its bbox. This makes the merge independent of
+  // the stored key format, so a key-scheme change (e.g. adding w/h) or an old client can't leave two
+  // entries for the SAME answer (which would duplicate the mask). Payload-less tombstones (bbox
+  // 0,0,0,0, from a clozeTomb with no live card) keep their stored key.
+  const map: ClozeMap = {};
+  for (const [k, e] of Object.entries(b.clozesLww ?? {})) {
+    const ck = e.bbox && (e.bbox.w > 0 || e.bbox.h > 0) ? clozeKey(e.pageIndex, e.bbox) : k;
+    if (!map[ck] || map[ck].t < e.t) map[ck] = e;
+  }
   if (Object.keys(map).length === 0)
     for (const c of b.clozes ?? []) {
       const k = clozeKey(c.pageIndex, c.bbox);

@@ -25,9 +25,12 @@ interface CardLike {
   answerRect: Rect;
 }
 
-/** Portable answer key = page + quantized answer position (round absorbs sub-point detection jitter). */
+/** Portable answer key = page + quantized answer position AND size. Round absorbs sub-point detection
+ * jitter; including w/h disambiguates two answers whose top-left rounds to the same px on a DENSE page
+ * (~24 terms/page) — without it a key collision would drop a mask / mis-anchor a ★. MUST stay
+ * identical to contentMerge.clozeKey (a ★ and the answer it sits on share this anchor). */
 export function cardKey(pageIndex: number, r: Rect): string {
-  return `${pageIndex}:${Math.round(r.y)}:${Math.round(r.x)}`;
+  return `${pageIndex}:${Math.round(r.y)}:${Math.round(r.x)}:${Math.round(r.w)}:${Math.round(r.h)}`;
 }
 
 /** id <-> portable-key maps for a set of cards (cards without an id are skipped). */
