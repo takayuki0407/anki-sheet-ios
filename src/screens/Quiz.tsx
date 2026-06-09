@@ -40,6 +40,13 @@ const DENSITIES: { key: Density; label: string }[] = [
   { key: "many", label: "多め" },
 ];
 
+type PageFilter = "all" | "todo" | "done";
+const FILTERS: { key: PageFilter; label: string }[] = [
+  { key: "all", label: "すべて" },
+  { key: "todo", label: "未生成" },
+  { key: "done", label: "生成済み" },
+];
+
 // ---- page-thumbnail cache + concurrency limiter (module scope) --------------------------------
 // The 生成 grid shows a pdf.js thumbnail per page, but pdf.js serializes render() on ONE canvas, so
 // firing cover() for 200+ pages at mount stalls the whole list (every card stuck on a spinner — the
@@ -242,8 +249,18 @@ function GenerateTab({
     setVisiblePages(new Set(info.viewableItems.filter((v) => v.isViewable).map((v) => v.item)));
   });
   const viewCfgRef = useRef({ itemVisiblePercentThreshold: 10 });
+  const [filter, setFilter] = useState<PageFilter>("all");
 
   const pages = useMemo(() => [...termsByPage.keys()].sort((a, b) => a - b), [termsByPage]);
+  const genCount = useMemo(
+    () => pages.filter((p) => (countsByPage.get(p) ?? 0) > 0).length,
+    [pages, countsByPage],
+  );
+  // Filter is DISPLAY-ONLY — selection (incl. hidden pages) is preserved across switches.
+  const displayPages = useMemo(() => {
+    if (filter === "all") return pages;
+    return pages.filter((p) => ((countsByPage.get(p) ?? 0) > 0) === (filter === "done"));
+  }, [pages, countsByPage, filter]);
   const toGenerate = useMemo(
     () => [...selected].filter((p) => !(countsByPage.get(p) ?? 0)).sort((a, b) => a - b),
     [selected, countsByPage],
@@ -380,8 +397,24 @@ function GenerateTab({
           <Text style={styles.smBtnText}>クリア</Text>
         </Pressable>
       </View>
+      <View style={styles.genRow}>
+        <Text style={styles.genLabel}>表示</Text>
+        <View style={styles.presetRow}>
+          {FILTERS.map((f) => (
+            <Pressable
+              key={f.key}
+              style={[styles.preset, filter === f.key && styles.presetOn]}
+              onPress={() => setFilter(f.key)}
+            >
+              <Text style={[styles.presetText, filter === f.key && styles.presetTextOn]}>
+                {f.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
       <Text style={styles.muted}>
-        暗記箇所のあるページのみ表示（{pages.length}ページ）。選んで「まとめて生成」。生成済みは枠を消費しません。
+        生成済み {genCount} / {pages.length} ページ。暗記箇所のあるページを選んで「まとめて生成」（生成済みは枠を消費しません）。
       </Text>
     </View>
   );
@@ -389,7 +422,7 @@ function GenerateTab({
   return (
     <View style={styles.flex}>
       <FlatList
-        data={pages}
+        data={displayPages}
         keyExtractor={(p) => String(p)}
         numColumns={3}
         columnWrapperStyle={styles.pickerRow}
@@ -463,6 +496,9 @@ function PageCard({
     if (uri || !pdfUrl || !engine.ready || !active) return; // fetch once, and only after it scrolls in
     return loadThumb(engine, pdfUrl, pageIndex, setUri);
   }, [engine, pdfUrl, pageIndex, active, uri]);
+  const isGenerated = generated > 0;
+  // 4 distinct states via NON-overlapping channels: selection = top-right ✓ + sand border;
+  // generated = top-left 済 pill + teal count text. So both can show at once without clashing.
   return (
     <Pressable style={[styles.card, selected && styles.cardSel]} onPress={onToggle}>
       <View style={[styles.thumb, selected && styles.thumbSel]}>
@@ -471,6 +507,11 @@ function PageCard({
         ) : (
           <Text style={styles.thumbPhText}>P.{pageIndex + 1}</Text>
         )}
+        {isGenerated ? (
+          <View style={styles.genPill}>
+            <Text style={styles.genPillText}>済</Text>
+          </View>
+        ) : null}
         {selected ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>✓</Text>
@@ -479,7 +520,9 @@ function PageCard({
       </View>
       <View style={styles.cardMeta}>
         <Text style={styles.cardP}>P.{pageIndex + 1}</Text>
-        <Text style={styles.muted}>{generated ? `✓${generated}問` : `暗記${terms}`}</Text>
+        <Text style={isGenerated ? styles.genText : styles.muted}>
+          {isGenerated ? `✓${generated}問` : `暗記${terms}`}
+        </Text>
       </View>
     </Pressable>
   );
@@ -627,14 +670,20 @@ const styles = StyleSheet.create({
   smBtnText: { fontSize: 13, color: colors.ocean, fontWeight: "600" },
   pickerRow: { gap: 10 },
   pickerContent: { paddingBottom: 16, gap: 12 },
-  card: { flex: 1 / 3, maxWidth: "31%", marginBottom: 10 },
+  // Fixed card width + fixed thumb height. The old `flex:1/3` (flexBasis 0%) with a thumb sized only
+  // by a child's aspectRatio left Yoga unable to resolve dimensions, so cards collapsed to a point and
+  // only the 2px thumb border showed (the "• • •"). Concrete sizes make each card a real box.
+  card: { width: "31%", marginBottom: 10 },
   cardSel: {},
-  thumb: { aspectRatio: 0.7, borderRadius: 6, overflow: "hidden", backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  thumb: { width: "100%", height: 150, borderRadius: 6, overflow: "hidden", backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   thumbSel: { borderColor: colors.sand },
   thumbImg: { width: "100%", height: "100%" },
   thumbPhText: { fontSize: 13, fontWeight: "700", color: colors.muted }, // placeholder until the thumb loads
   badge: { position: "absolute", top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.sand, alignItems: "center", justifyContent: "center" },
   badgeText: { color: "#fff", fontWeight: "800", fontSize: 13 },
+  genPill: { position: "absolute", top: 4, left: 4, backgroundColor: "#0f766e", borderRadius: 6, paddingHorizontal: 5, paddingVertical: 1 },
+  genPillText: { color: "#fff", fontWeight: "800", fontSize: 10 },
+  genText: { color: "#0f766e", fontSize: 12, fontWeight: "700", marginVertical: 4 },
   cardMeta: { flexDirection: "row", justifyContent: "space-between", marginTop: 3 },
   cardP: { fontSize: 12, color: colors.text, fontWeight: "600" },
   genFooter: { paddingTop: 8, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
