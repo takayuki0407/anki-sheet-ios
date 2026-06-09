@@ -33,7 +33,7 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
       try {
         setBusy(true);
         const tier = await purchase(pkg);
-        if (tier !== "none") setView({ name: "decks" });
+        if (tier !== "free") setView({ name: "decks" });
       } catch (e) {
         Alert.alert("購入エラー", e instanceof Error ? e.message : String(e));
       } finally {
@@ -47,8 +47,8 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
     try {
       setBusy(true);
       const tier = await restore();
-      Alert.alert(tier !== "none" ? "復元しました" : "復元できる購入が見つかりません");
-      if (tier !== "none") setView({ name: "decks" });
+      Alert.alert(tier !== "free" ? "復元しました" : "復元できる購入が見つかりません");
+      if (tier !== "free") setView({ name: "decks" });
     } catch (e) {
       Alert.alert("復元エラー", e instanceof Error ? e.message : String(e));
     } finally {
@@ -159,16 +159,19 @@ function DevTierPanel() {
     <View style={styles.dev}>
       <Text style={styles.devLabel}>[DEV] tier 切替</Text>
       <View style={styles.devRow}>
+        <Pressable style={styles.devBtn} onPress={() => sim("premium", true)}>
+          <Text style={styles.devBtnText}>Premium</Text>
+        </Pressable>
         <Pressable style={styles.devBtn} onPress={() => sim("pro", true)}>
           <Text style={styles.devBtnText}>Pro</Text>
         </Pressable>
         <Pressable style={styles.devBtn} onPress={() => sim("standard", true)}>
           <Text style={styles.devBtnText}>Standard</Text>
         </Pressable>
-        <Pressable style={styles.devBtn} onPress={() => sim("none", true)}>
-          <Text style={styles.devBtnText}>未契約</Text>
+        <Pressable style={styles.devBtn} onPress={() => sim("free", true)}>
+          <Text style={styles.devBtnText}>Free</Text>
         </Pressable>
-        <Pressable style={styles.devBtn} onPress={() => sim("none", false)}>
+        <Pressable style={styles.devBtn} onPress={() => sim("free", false)}>
           <Text style={styles.devBtnText}>解除(ungate)</Text>
         </Pressable>
       </View>

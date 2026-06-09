@@ -1,13 +1,16 @@
-// Subscription tier + book-count gate. Three states:
-//   pro      – unlimited books
+// Subscription tier (mirrors the server's account tier; the actual book cap is enforced
+// account-wide by the server, this local copy drives display + the dev switcher):
+//   premium  – unlimited + (Phase 2) adaptive SRS
+//   pro      – unlimited books + cloud sync
 //   standard – up to STANDARD_DECK_LIMIT books
-//   none     – no active subscription (e.g. after the 7-day trial) -> locked behind the paywall
-// `setTier`/`billingActive` are driven by the RevenueCat listener (see iap/purchases.ts).
+//   free     – 1 book (no subscription; the app stays usable — NO paywall hard-lock)
+// `tier`/`billingActive` are driven by the RevenueCat listener (see iap/purchases.ts).
 import { create } from "zustand";
 
-export type Tier = "none" | "standard" | "pro";
+export type Tier = "free" | "standard" | "pro" | "premium";
 
 export const STANDARD_DECK_LIMIT = 10;
+export const FREE_DECK_LIMIT = 1;
 
 interface EntitlementState {
   tier: Tier;
@@ -20,25 +23,29 @@ interface EntitlementState {
 }
 
 export const useEntitlements = create<EntitlementState>((set) => ({
-  tier: "none",
+  tier: "free",
   billingActive: false,
   ready: false,
   set: (p) => set(p),
 }));
 
-/** Tier used for gating: ungated environments behave as "pro" so dev/Expo Go isn't locked out. */
+/** Tier used for display: ungated environments behave as "pro" so dev/Expo Go isn't limited. */
 export function effectiveTier(s: { tier: Tier; billingActive: boolean }): Tier {
   return s.billingActive ? s.tier : "pro";
 }
 
-/** Hook: the effective (gating) tier. */
+/** Hook: the effective (display) tier. */
 export function useEffectiveTier(): Tier {
   return useEntitlements((s) => effectiveTier(s));
 }
 
-/** Max books for a tier (Infinity for pro / ungated). */
+/** Max books for a tier (the server enforces the real account-wide cap; this is for local display). */
 export function deckLimit(tier: Tier): number {
-  return tier === "pro" ? Infinity : tier === "standard" ? STANDARD_DECK_LIMIT : 0;
+  return tier === "pro" || tier === "premium"
+    ? Infinity
+    : tier === "standard"
+      ? STANDARD_DECK_LIMIT
+      : FREE_DECK_LIMIT;
 }
 
 /** Whether another deck may be added given the current count and (effective) tier. */

@@ -11,8 +11,8 @@ import Purchases, {
 } from "react-native-purchases";
 import { useEntitlements, type Tier } from "./entitlements";
 
-// Entitlement identifiers as configured in RevenueCat. "pro" outranks "standard".
-export const ENTITLEMENTS = { pro: "pro", standard: "standard" } as const;
+// Entitlement identifiers as configured in RevenueCat. "premium" > "pro" > "standard"; none = free.
+export const ENTITLEMENTS = { premium: "premium", pro: "pro", standard: "standard" } as const;
 
 const RC_KEYS = {
   ios: process.env.EXPO_PUBLIC_RC_IOS_KEY ?? "appl_REPLACE_WITH_YOUR_IOS_KEY",
@@ -23,9 +23,10 @@ let ready = false;
 
 function tierOf(info: CustomerInfo): Tier {
   const active = info.entitlements.active;
+  if (active[ENTITLEMENTS.premium]) return "premium";
   if (active[ENTITLEMENTS.pro]) return "pro";
   if (active[ENTITLEMENTS.standard]) return "standard";
-  return "none";
+  return "free"; // no active subscription = Free (1 book, no hard lock)
 }
 
 /** Apply a RevenueCat CustomerInfo snapshot to the entitlement store (tier + billingActive). */
@@ -71,7 +72,7 @@ export async function initPurchases(): Promise<boolean> {
     ready = true;
     return true;
   } catch {
-    useEntitlements.getState().set({ tier: "none", billingActive: true, ready: true });
+    useEntitlements.getState().set({ tier: "free", billingActive: true, ready: true });
     return false;
   }
 }
@@ -86,7 +87,7 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
   }
 }
 
-/** Purchase a package. Returns the resulting tier ("none" if cancelled or not granted). */
+/** Purchase a package. Returns the resulting tier ("free" if cancelled or not granted). */
 export async function purchase(pkg: PurchasesPackage): Promise<Tier> {
   if (!(await initPurchases())) throw new Error("購入を利用できません（設定が必要です）");
   try {
@@ -94,14 +95,14 @@ export async function purchase(pkg: PurchasesPackage): Promise<Tier> {
     syncCustomerInfo(customerInfo);
     return tierOf(customerInfo);
   } catch (e) {
-    if ((e as { userCancelled?: boolean }).userCancelled) return "none";
+    if ((e as { userCancelled?: boolean }).userCancelled) return "free";
     throw e;
   }
 }
 
-/** Restore purchases. Returns the resulting tier ("none" if nothing to restore). */
+/** Restore purchases. Returns the resulting tier ("free" if nothing to restore). */
 export async function restore(): Promise<Tier> {
-  if (!(await initPurchases())) return "none";
+  if (!(await initPurchases())) return "free";
   const info = await Purchases.restorePurchases();
   syncCustomerInfo(info);
   return tierOf(info);

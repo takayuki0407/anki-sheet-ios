@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import * as StoreReview from "expo-store-review";
 import { useApp } from "../store/session";
-import { STANDARD_DECK_LIMIT, effectiveTier, useEntitlements } from "../iap/entitlements";
+import { FREE_DECK_LIMIT, STANDARD_DECK_LIMIT, effectiveTier, useEntitlements } from "../iap/entitlements";
 import { deckCountTotal } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
 import { restore } from "../iap/purchases";
@@ -137,7 +137,7 @@ export function Info() {
   const doRestore = useCallback(async () => {
     try {
       const tier = await restore();
-      Alert.alert(tier !== "none" ? "復元しました" : "復元できる購入が見つかりません");
+      Alert.alert(tier !== "free" ? "復元しました" : "復元できる購入が見つかりません");
     } catch (e) {
       Alert.alert("エラー", e instanceof Error ? e.message : String(e));
     }
@@ -234,14 +234,28 @@ export function Info() {
           <Row
             label="現在のプラン"
             value={
-              eff === "pro"
-                ? "Pro（無制限）"
-                : eff === "standard"
-                  ? `Standard（本 ${deckCount ?? "…"} / ${STANDARD_DECK_LIMIT} 冊）`
-                  : "未契約"
+              eff === "premium"
+                ? "Premium（無制限）"
+                : eff === "pro"
+                  ? "Pro（無制限）"
+                  : eff === "standard"
+                    ? `Standard（本 ${deckCount ?? "…"} / ${STANDARD_DECK_LIMIT} 冊）`
+                    : `Free（本 ${deckCount ?? "…"} / ${FREE_DECK_LIMIT} 冊）`
             }
           />
-          {eff !== "pro" ? (
+          <Row
+            label="AI ○×問題の生成"
+            value={
+              eff === "premium"
+                ? "月200ページ"
+                : eff === "pro"
+                  ? "月30ページ"
+                  : eff === "standard"
+                    ? "月10ページ"
+                    : "月1ページ"
+            }
+          />
+          {eff !== "pro" && eff !== "premium" ? (
             <Row label="プランをアップグレード" onPress={() => setView({ name: "paywall" })} />
           ) : null}
           <Row

@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useApp } from "../store/session";
-import { canAddDeck, useEffectiveTier } from "../iap/entitlements";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import { deckPdfFile } from "../db/files";
 import * as Sharing from "expo-sharing";
@@ -89,7 +88,6 @@ function sortItems(items: DeckVM[], mode: SortMode): DeckVM[] {
 export function DeckList() {
   const setView = useApp((s) => s.setView);
   const bumpDecks = useApp((s) => s.bumpDecks);
-  const tier = useEffectiveTier();
   const engine = useDetectionEngine();
   const [items, setItems] = useState<DeckVM[] | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("l");
