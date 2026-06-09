@@ -67,6 +67,14 @@ export async function registerBook(
   return { ok: true };
 }
 
+/** Non-destructive release from the cap: flip an ACTIVE cloud-backed (size>0) book to 'retained'
+ * (R2 kept, slot freed, re-Pro restorable). Used by a non-sync (Standard/Free) local delete so it
+ * actually frees a slot instead of leaving a stuck cloud-only active row. 404 is a harmless no-op. */
+export async function retainBook(bookId: string): Promise<void> {
+  const res = await authedFetch(`/books/${encodeURIComponent(bookId)}/retain`, { method: "POST" });
+  if (!res.ok && res.status !== 404) throw new Error(`retain failed: ${res.status}`);
+}
+
 /** Resolve a downgrade trim: keep these book ids (server makes the kept set authoritative). */
 export async function submitTrim(keep: string[]): Promise<void> {
   const res = await authedFetch("/trim", { method: "POST", body: JSON.stringify({ keep }) });

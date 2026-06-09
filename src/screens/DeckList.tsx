@@ -22,6 +22,7 @@ import {
 import { exportBackup, importBackup } from "../db/backup";
 import {
   listBooks,
+  retainBook,
   syncErrorMessage,
   unregisterBook,
   updateBookMeta,
@@ -243,6 +244,29 @@ export function DeckList() {
     );
   }, []);
 
+  // Non-destructive release for a cloud-only active book on a non-sync tier: retain it (frees the
+  // slot, keeps R2 for re-Pro restore) instead of permanently deleting.
+  const onRetainCloud = useCallback((b: AccountBook) => {
+    Alert.alert(
+      "枠から外しますか?",
+      `「${b.name || "（無題）"}」を枠から外し、クラウドに退避します（枠が空きます）。Proに戻すと復元できます（保持〜約6ヶ月）。`,
+      [
+        { text: "キャンセル", style: "cancel" },
+        {
+          text: "枠から外す",
+          onPress: async () => {
+            try {
+              await retainBook(b.book_id);
+              setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
+            } catch (e) {
+              Alert.alert("退避できませんでした", syncErrorMessage(e));
+            }
+          },
+        },
+      ],
+    );
+  }, []);
+
   useEffect(() => {
     getMeta("bookshelfView").then((v) => {
       if (isViewMode(v)) setViewMode(v);
@@ -419,10 +443,13 @@ export function DeckList() {
       // Warn based on whether the account has a cloud copy (size>0). Device-only books (or
       // unknown/offline → safe side) are UNRECOVERABLE; cloud-backed books restore on re-Pro.
       const backed = cloudKnown ? cloudBackedDecks.has(deck.id) : null;
+      const nonSync = !cloudPro; // Standard/Free: a cloud-backed local delete retains (frees a slot)
       const msg =
-        backed === true
-          ? `「${deck.name}」をこの端末から削除します。\nこの本はクラウドにバックアップがあります。Proに戻せば、あとで「クラウド」から取り込み直せます。`
-          : `「${deck.name}」をこの端末から削除します。\n⚠ この本は端末内だけにあります。削除すると復元できません。`;
+        backed !== true
+          ? `「${deck.name}」をこの端末から削除します。\n⚠ この本は端末内だけにあります。削除すると復元できません。`
+          : nonSync
+            ? `「${deck.name}」をこの端末から削除し、クラウドに退避します（枠が空きます）。Proに戻すと復元できます（保持〜約6ヶ月）。`
+            : `「${deck.name}」をこの端末から削除します。\nこの本はクラウドにバックアップがあります。Proに戻せば、あとで「クラウド」から取り込み直せます。`;
       Alert.alert(
         "この端末から削除しますか?",
         msg,
@@ -432,22 +459,23 @@ export function DeckList() {
             text: "削除",
             style: "destructive",
             onPress: async () => {
-              // Local-only delete: a book WITH a cloud blob stays in the account (restorable). But a
-              // book with NO cloud blob (Standard / upload never finished) isn't stored anywhere, so
-              // keeping its registry row would leak a cap slot as an unrecoverable phantom — unregister
-              // it too. (Cloud deletion of a blob-backed book is the explicit「クラウドから削除」.)
+              // size=0 (no cloud copy) → unregister (permanent, frees the slot). size>0 on a non-sync
+              // tier → retain (active→retained: frees the slot, keeps R2, restorable on re-Pro).
+              // size>0 on Pro+ → keep active (re-downloadable); just release the holder if we held it.
               const bid = await deckBookId(deck.id);
               await deleteDeck(deck.id);
               if (bid) {
                 void deleteBookQuestions(bid).catch(() => {}); // drop this device's AI questions
                 if (cloudReadyRef.current && !cloudBlobIdsRef.current.has(bid)) {
                   void unregisterBook(bid).catch(() => {}); // no cloud copy → free the slot
+                } else if (cloudReadyRef.current && cloudBlobIdsRef.current.has(bid) && nonSync) {
+                  void retainBook(bid).catch(() => {}); // Standard/Free → retain (free slot, keep R2)
                 } else if (
                   cloudReadyRef.current &&
                   cloudBlobIdsRef.current.has(bid) &&
                   cloudDeviceByDeckRef.current.get(deck.id) === deviceLabel()
                 ) {
-                  // We were the holder of this cloud-backed book → clear the holder (now cloud-only).
+                  // Pro+ holder → keep active, just release the holder (now cloud-only).
                   void updateBookMeta(bid, { device: null }).catch(() => {});
                 }
               }
@@ -459,7 +487,7 @@ export function DeckList() {
         ],
       );
     },
-    [load, loadCloud, cloudKnown, cloudBackedDecks],
+    [load, loadCloud, cloudKnown, cloudBackedDecks, cloudPro],
   );
 
   const onLongPress = useCallback(
@@ -624,6 +652,11 @@ export function DeckList() {
                         <Text style={styles.cloudBtnText}>
                           {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
                         </Text>
+                      </Pressable>
+                    ) : null}
+                    {b.size > 0 && !cloudPro ? (
+                      <Pressable style={styles.cloudBtn} onPress={() => onRetainCloud(b)}>
+                        <Text style={styles.cloudBtnText}>枠から外す</Text>
                       </Pressable>
                     ) : null}
                     <Pressable
