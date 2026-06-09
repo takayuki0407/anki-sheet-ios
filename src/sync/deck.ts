@@ -88,6 +88,17 @@ interface DeckContent {
 const blobUrl = (bookId: string) => `${SYNC_BASE}/books/${encodeURIComponent(bookId)}/blob`;
 const bookKey = (deckId: number) => `book:${deckId}`;
 const contentKey = (deckId: number) => `contentAt:${deckId}`; // local copy's content version
+const regKey = (deckId: number) => `reg:${deckId}`; // "1" once GENUINELY in the account registry
+
+/** True once this deck has been in the account registry (genuine register / download / seen-known).
+ * Lets reconcile distinguish an orphan (registered but now gone → unregistered elsewhere → delete)
+ * from a fresh local-only import (offline / fail-open register → keep). */
+export async function isRegistered(deckId: number): Promise<boolean> {
+  return (await getMeta(regKey(deckId))) === "1";
+}
+export async function setRegistered(deckId: number): Promise<void> {
+  await setMeta(regKey(deckId), "1");
+}
 
 function uuid(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -296,9 +307,10 @@ export async function syncNewDeck(deckId: number, name: string, pageCount: numbe
   const bookId = uuid();
   await setMeta(bookKey(deckId), bookId);
   try {
-    await registerBook(bookId, name, pageCount, deviceLabel());
+    const r = await registerBook(bookId, name, pageCount, deviceLabel());
+    if (r.ok) await setRegistered(deckId); // GENUINE registration → reconcile may follow an unregister
   } catch {
-    /* registry hiccup — keep the local deck */
+    /* registry hiccup — keep the local deck; NOT registered (the server doesn't know it yet) */
   }
   try {
     await uploadDeck(bookId, deckId);
@@ -328,6 +340,7 @@ export async function downloadDeck(book: AccountBook): Promise<number> {
     clozes: content.clozes,
   });
   await setMeta(bookKey(deckId), book.book_id);
+  await setRegistered(deckId); // came from the account registry → orphan-cleanup eligible
   await setMeta(contentKey(deckId), String(content.contentAt ?? 0)); // baseline so we don't re-pull it
   // Adopt any cloud tombstones so a mask deleted elsewhere isn't re-added locally later (P0-2).
   await setMeta(`clozeTomb:${deckId}`, JSON.stringify(tombstonesOf(content.clozesLww ?? {})));

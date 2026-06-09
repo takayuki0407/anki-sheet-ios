@@ -34,7 +34,9 @@ import {
   cachedQuota,
   deckBookId,
   downloadDeck,
+  isRegistered,
   localBookIds,
+  setRegistered,
 } from "../sync/deck";
 import { deviceLabel } from "../sync/device";
 import type { DeckRow } from "../db/rows";
@@ -145,28 +147,45 @@ export function DeckList() {
       const active = new Set(
         acct.books.filter((b) => (b.status ?? "active") === "active").map((b) => b.book_id),
       );
-      // Cloud section = ACTIVE account books not on this device (retained/trimmed aren't offered).
-      setCloud(acct.books.filter((b) => !local.has(b.book_id) && active.has(b.book_id)));
-      setCloudPro(acct.unlimited); // cloud download/restore is Pro/admin-only
-      void backfillCloudIfPro(); // Pro: upload any local book that has no cloud file yet
-      // Per-deck holder name (for the delete-clears-holder logic) + single-home setup.
       const me = deviceLabel();
       const singleHome = !acct.unlimited; // Standard/Free: a book lives on ONE device (the holder)
+      // Cloud section = ACTIVE account books not on this device.
+      //  • Pro+ (sync): every active book not held locally (downloadable/restore, incl. zero-holder).
+      //  • Standard/Free (non-sync): ONLY books held by ANOTHER device (`device` set, ≠ me) — so a
+      //    size=0 device-only book can be cleared from here to free the slot. Zero-holder/retained
+      //    books are NOT shown (nothing to download; managed from the bookshelf).
+      setCloud(
+        acct.books.filter((b) => {
+          if (!active.has(b.book_id) || local.has(b.book_id)) return false;
+          if (acct.unlimited) return true;
+          return !!b.device && b.device !== me;
+        }),
+      );
+      setCloudPro(acct.unlimited); // cloud download/restore is Pro/admin-only
+      void backfillCloudIfPro(); // Pro: upload any local book that has no cloud file yet
+      // Per-deck holder name (for the delete-clears-holder logic).
       const devMap = new Map<number, string | null>();
       const devByBook = new Map(acct.books.map((b) => [b.book_id, b.device ?? null] as const));
       for (const [bid, deckId] of local) devMap.set(deckId, devByBook.get(bid) ?? null);
       cloudDeviceByDeckRef.current = devMap;
+      // Only a NON-empty response is authoritative for the *destructive* orphan cleanup below.
+      const canPrune = acct.books.length > 0;
       // Account-wide trim follow: delete local copies of books the server marked non-active; on a
-      // non-sync tier ALSO drop active books now held by another device (single-home).
+      // non-sync tier ALSO drop active books now held by another device (single-home), and prune
+      // orphans — a book we PREVIOUSLY registered that's now gone from the account (unregistered on
+      // another device). A never-registered local-only import (offline / fail-open) is left alone.
       let removed = false;
       for (const [bid, deckId] of local) {
         const nonActive = known.has(bid) && !active.has(bid);
         const heldElsewhere =
           singleHome && active.has(bid) && !!devByBook.get(bid) && devByBook.get(bid) !== me;
-        if (nonActive || heldElsewhere) {
+        const orphan = singleHome && canPrune && !known.has(bid) && (await isRegistered(deckId));
+        if (nonActive || heldElsewhere || orphan) {
           await deleteDeck(deckId);
           void deleteBookQuestions(bid).catch(() => {});
           removed = true;
+        } else if (active.has(bid) && !(await isRegistered(deckId))) {
+          await setRegistered(deckId); // seen in the account → enable future orphan cleanup
         }
       }
       // Adopt favorite / latest-opened state set on other devices for books we still have locally.
@@ -219,12 +238,11 @@ export function DeckList() {
     [load, bumpDecks],
   );
 
-  // Permanently remove a book from the CLOUD (R2 file + registry row + progress) for the whole
-  // account — the deliberate counterpart to the bookshelf's local-only delete. Offered in the cloud
-  // section (books not on this device).
+  // Pro+ : permanently remove a book from the CLOUD (R2 file + registry row + progress) for the whole
+  // account — the deliberate counterpart to the bookshelf's local-only delete. Always confirms.
   const onRemoveCloud = useCallback((b: AccountBook) => {
     Alert.alert(
-      "クラウドから削除しますか?",
+      "クラウドから完全に削除しますか?",
       `「${b.name || "（無題）"}」をクラウドから完全に削除します。すべての端末から取り込めなくなります。元に戻せません。`,
       [
         { text: "キャンセル", style: "cancel" },
@@ -244,27 +262,32 @@ export function DeckList() {
     );
   }, []);
 
-  // Non-destructive release for a cloud-only active book on a non-sync tier: retain it (frees the
-  // slot, keeps R2 for re-Pro restore) instead of permanently deleting.
-  const onRetainCloud = useCallback((b: AccountBook) => {
-    Alert.alert(
-      "枠から外しますか?",
-      `「${b.name || "（無題）"}」を枠から外し、クラウドに退避します（枠が空きます）。Proに戻すと復元できます（保持〜約6ヶ月）。`,
-      [
-        { text: "キャンセル", style: "cancel" },
-        {
-          text: "枠から外す",
-          onPress: async () => {
-            try {
-              await retainBook(b.book_id);
-              setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
-            } catch (e) {
-              Alert.alert("退避できませんでした", syncErrorMessage(e));
-            }
-          },
+  // Standard/Free : single action — free the account slot another device is holding. size>0 → retain
+  // (frees the slot, keeps R2 for re-Pro restore); size=0 → unregister (permanent). Always confirms,
+  // warns harder when there's no cloud copy, and defaults focus to キャンセル (style:"cancel").
+  const onReleaseCloud = useCallback((b: AccountBook) => {
+    const hasBlob = b.size > 0;
+    const where = b.device ? `「${b.device}」` : "別の端末";
+    const title = b.name || "（無題）";
+    const msg = hasBlob
+      ? `${where}に保存中の「${title}」を削除して枠を空けます。\nProに戻すと復元できます（保持〜約6ヶ月）。`
+      : `${where}に保存中の「${title}」を削除して枠を空けます。\n⚠ クラウドに保存がないため、削除すると復元できません。`;
+    Alert.alert("枠を空けますか?", msg, [
+      { text: "キャンセル", style: "cancel" },
+      {
+        text: "削除",
+        style: hasBlob ? "default" : "destructive",
+        onPress: async () => {
+          try {
+            if (hasBlob) await retainBook(b.book_id);
+            else await unregisterBook(b.book_id);
+            setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
+          } catch (e) {
+            Alert.alert("枠を空けられませんでした", syncErrorMessage(e));
+          }
         },
-      ],
-    );
+      },
+    ]);
   }, []);
 
   useEffect(() => {
@@ -628,10 +651,9 @@ export function DeckList() {
               <View style={styles.cloudSection}>
                 <Text style={styles.cloudTitle}>クラウド（この端末にない本）</Text>
                 <Text style={styles.cloudNote}>
-                  同じアカウントの本です。
-                  {cloudPro ? "「取り込む」で追加、" : ""}
-                  「削除」ですべての端末から完全に削除します。クラウド保存のない本（他端末のみ・
-                  アップロード未完了）はダウンロードできませんが、「削除」で枠を空けられます。
+                  {cloudPro
+                    ? "同じアカウントの本です。「取り込む」で追加、「クラウドから完全に削除」ですべての端末から削除します。"
+                    : "他の端末にある本です。各本の「…から削除」で、この端末のアカウント枠を空けられます。クラウド保存がある本はProに戻すと復元できますが、ない本（端末のみ）は復元できません。"}
                 </Text>
                 {cloud.map((b) => (
                   <View key={b.book_id} style={styles.cloudRow}>
@@ -639,33 +661,39 @@ export function DeckList() {
                       <Text style={styles.cloudName} numberOfLines={1}>
                         {b.name || "（無題）"}
                       </Text>
-                      <Text style={styles.cloudDevice}>
-                        {b.size > 0 ? b.device || "クラウドのみ" : "クラウド保存なし"}
-                      </Text>
+                      <View style={styles.cloudMetaRow}>
+                        <Text style={b.size > 0 ? styles.badgeCloud : styles.badgeLocal}>
+                          {b.size > 0 ? "☁️ クラウドあり" : "端末のみ（復元不可）"}
+                        </Text>
+                        <Text style={styles.cloudDevice}>
+                          {b.device ? `「${b.device}」に保存` : "クラウドのみ"}
+                        </Text>
+                      </View>
                     </View>
-                    {b.size > 0 && cloudPro ? (
-                      <Pressable
-                        style={styles.cloudBtn}
-                        disabled={downloading.has(b.book_id)}
-                        onPress={() => onDownload(b)}
-                      >
+                    {cloudPro ? (
+                      <>
+                        {b.size > 0 ? (
+                          <Pressable
+                            style={styles.cloudBtn}
+                            disabled={downloading.has(b.book_id)}
+                            onPress={() => onDownload(b)}
+                          >
+                            <Text style={styles.cloudBtnText}>
+                              {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                        <Pressable style={styles.cloudDeleteBtn} onPress={() => onRemoveCloud(b)}>
+                          <Text style={styles.cloudDeleteText}>クラウドから完全に削除</Text>
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Pressable style={styles.cloudBtn} onPress={() => onReleaseCloud(b)}>
                         <Text style={styles.cloudBtnText}>
-                          {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
+                          {b.device ? `「${b.device}」から削除` : "削除して枠を空ける"}
                         </Text>
                       </Pressable>
-                    ) : null}
-                    {b.size > 0 && !cloudPro ? (
-                      <Pressable style={styles.cloudBtn} onPress={() => onRetainCloud(b)}>
-                        <Text style={styles.cloudBtnText}>枠から外す</Text>
-                      </Pressable>
-                    ) : null}
-                    <Pressable
-                      style={styles.cloudDeleteBtn}
-                      disabled={downloading.has(b.book_id)}
-                      onPress={() => onRemoveCloud(b)}
-                    >
-                      <Text style={styles.cloudDeleteText}>削除</Text>
-                    </Pressable>
+                    )}
                   </View>
                 ))}
               </View>
@@ -800,6 +828,7 @@ const styles = StyleSheet.create({
   cloudRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
   cloudInfo: { flex: 1 },
   cloudName: { fontSize: 14, fontWeight: "600", color: colors.text },
+  cloudMetaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 2 },
   cloudDevice: { fontSize: 11, color: colors.muted },
   cloudBtn: {
     backgroundColor: colors.surface,
