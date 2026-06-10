@@ -13,6 +13,7 @@ import { ImportWizard } from "./src/screens/ImportWizard";
 import { PageViewer } from "./src/screens/PageViewer";
 import { Settings } from "./src/screens/Settings";
 import { Quiz } from "./src/screens/Quiz";
+import { Review } from "./src/screens/Review";
 import { Paywall } from "./src/screens/Paywall";
 import { Info } from "./src/screens/Info";
 import { Login } from "./src/screens/Login";
@@ -38,6 +39,8 @@ function Router() {
       return <Settings key={view.deckId} deckId={view.deckId} from={view.from} />;
     case "quiz":
       return <Quiz key={view.deckId} deckId={view.deckId} from={view.from} />;
+    case "review":
+      return <Review />;
     case "paywall":
       return <Paywall />;
     case "info":

@@ -91,5 +91,33 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     );
     CREATE INDEX IF NOT EXISTS idx_questions_book_page ON questions (bookId, pageIndex);
   `);
+
+  // ---- 機能拡張 4択とSRS (mirrors web Dexie v6 / server migration 0008) ----
+  // ALTER TABLE has no IF NOT EXISTS, so probe the column list first (idempotent across launches).
+  const qCols = await db.getAllAsync<{ name: string }>("PRAGMA table_info(questions)");
+  if (!qCols.some((c) => c.name === "qtype")) {
+    await db.execAsync(`
+      ALTER TABLE questions ADD COLUMN qtype TEXT NOT NULL DEFAULT 'tf';
+      ALTER TABLE questions ADD COLUMN choices TEXT;
+    `);
+  }
+  await db.execAsync(`
+    CREATE INDEX IF NOT EXISTS idx_questions_book_page_type ON questions (bookId, pageIndex, qtype);
+
+    CREATE TABLE IF NOT EXISTS reviews (
+      questionId TEXT    PRIMARY KEY,
+      bookId     TEXT    NOT NULL,
+      ease       REAL    NOT NULL,
+      intervalD  INTEGER NOT NULL,
+      reps       INTEGER NOT NULL,
+      lapses     INTEGER NOT NULL,
+      dueAt      INTEGER NOT NULL,
+      lastAt     INTEGER NOT NULL,
+      lastOk     INTEGER NOT NULL,
+      updatedAt  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_reviews_book ON reviews (bookId);
+    CREATE INDEX IF NOT EXISTS idx_reviews_due ON reviews (dueAt);
+  `);
   return db;
 }

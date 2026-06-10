@@ -68,7 +68,7 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
       )}
       <View style={styles.body}>
         <Text style={styles.title}>Kiokumate を始める</Text>
-        <Text style={styles.lead}>無料で1冊から。Proは初回7日間無料・いつでも解約できます。</Text>
+        <Text style={styles.lead}>無料で1冊から。Premiumは初回7日間無料・いつでも解約できます。</Text>
         {locked && user ? (
           <Text style={styles.accountNote}>
             ログイン中: {user.email ?? "Apple ID"}（有効なサブスクリプションは見つかりませんでした）
@@ -82,12 +82,17 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
           <View style={styles.plan}>
             <Text style={styles.planName}>Standard</Text>
             <Text style={styles.planPrice}>¥300/月 ・ ¥2,500/年</Text>
-            <Text style={styles.planDesc}>本を {STANDARD_DECK_LIMIT} 冊まで取り込み</Text>
+            <Text style={styles.planDesc}>本を {STANDARD_DECK_LIMIT} 冊まで取り込み・AI問題生成 月10回</Text>
           </View>
-          <View style={[styles.plan, styles.planPro]}>
+          <View style={styles.plan}>
             <Text style={styles.planName}>Pro</Text>
             <Text style={styles.planPrice}>¥600/月 ・ ¥5,000/年</Text>
-            <Text style={styles.planDesc}>本を無制限に取り込み＋クラウドストレージ5GB・全ての端末/プラットフォームで進捗同期</Text>
+            <Text style={styles.planDesc}>本を無制限に取り込み・クラウドストレージ5GB・全ての端末/プラットフォームで進捗同期・AI問題生成 月30回</Text>
+          </View>
+          <View style={[styles.plan, styles.planPro]}>
+            <Text style={styles.planName}>Premium</Text>
+            <Text style={styles.planPrice}>¥980/月 ・ ¥8,000/年</Text>
+            <Text style={styles.planDesc}>Proの全機能＋AI問題生成 月200回・「今日の復習」（間違えやすい問題を最適なタイミングで再出題）・初回7日間無料</Text>
           </View>
         </View>
 
@@ -122,10 +127,10 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         </Pressable>
 
         <Text style={styles.disclosure}>
-          Proには初回のみ7日間の無料トライアルが付きます。トライアル終了時、解約しない限りProの料金が
-          自動で請求されます。サブスクリプションは、現在の期間終了の24時間前までに自動更新をオフにしない
-          限り自動更新されます。更新の管理・解約はiOSの「設定」→ Apple ID →「サブスクリプション」から
-          行えます。
+          Premiumには初回のみ7日間の無料トライアルが付きます。トライアル終了時、解約しない限りPremiumの
+          料金が自動で請求されます。サブスクリプションは、現在の期間終了の24時間前までに自動更新をオフに
+          しない限り自動更新されます。更新の管理・解約はiOSの「設定」→ Apple ID →「サブスクリプション」
+          から行えます。
         </Text>
         <View style={styles.legalRow}>
           <Pressable onPress={() => Linking.openURL(TERMS_URL)} hitSlop={6}>
@@ -159,9 +164,8 @@ const styles = StyleSheet.create({
   accountNote: { color: colors.textSub, fontSize: 12, textAlign: "center" },
   helpLink: { color: colors.ocean, fontSize: 13, textAlign: "center", paddingVertical: 6 },
   reloadBox: { gap: 8 },
-  plans: { flexDirection: "row", gap: 10, marginVertical: 4 },
+  plans: { gap: 8, marginVertical: 4 },
   plan: {
-    flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,

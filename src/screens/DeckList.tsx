@@ -10,6 +10,7 @@ import * as Sharing from "expo-sharing";
 import * as DocumentPicker from "expo-document-picker";
 import {
   answerCount,
+  allReviews,
   deckCountTotal,
   deleteBookQuestions,
   deleteDeck,
@@ -111,6 +112,11 @@ export function DeckList() {
   const [cloudBackedDecks, setCloudBackedDecks] = useState<Set<number>>(new Set());
   const [cloudKnown, setCloudKnown] = useState(false);
 
+  // 今日の復習 (Premium): due SM-2 reviews across ALL books (local data); the server tier from
+  // loadCloud decides between the live card and the locked upsell card.
+  const [tier, setTier] = useState<string | null>(null);
+  const [reviewStats, setReviewStats] = useState<{ any: boolean; due: number } | null>(null);
+
   const load = useCallback(async () => {
     const decks = await listDecks();
     const vms = await Promise.all(
@@ -123,12 +129,16 @@ export function DeckList() {
       })),
     );
     setItems(vms);
+    const rv = await allReviews();
+    const now = Date.now();
+    setReviewStats({ any: rv.length > 0, due: rv.filter((r) => r.dueAt <= now).length });
   }, []);
 
   const loadCloud = useCallback(async () => {
     try {
       const [acct, local] = await Promise.all([listBooks(), localBookIds()]);
       void cacheQuota(acct); // remember the cap for offline import enforcement (§2.2a)
+      setTier(acct.tier);
       cloudBlobIdsRef.current = new Set(
         acct.books.filter((b) => b.size > 0).map((b) => b.book_id),
       );
@@ -617,6 +627,27 @@ export function DeckList() {
         </View>
       </View>
 
+      {tier === "premium" || tier === "admin" ? (
+        reviewStats && reviewStats.due > 0 ? (
+          <Pressable style={styles.reviewCard} onPress={() => setView({ name: "review" })}>
+            <Text style={styles.reviewCardTitle}>📚 今日の復習 {reviewStats.due}問</Text>
+            <Text style={styles.reviewCardSub}>
+              間違えやすい問題を、忘れる前のいまのタイミングで再出題します
+            </Text>
+          </Pressable>
+        ) : null
+      ) : reviewStats?.any && tier ? (
+        <Pressable
+          style={[styles.reviewCard, styles.reviewCardLocked]}
+          onPress={() => setView({ name: "paywall" })}
+        >
+          <Text style={[styles.reviewCardTitle, styles.reviewCardTitleLocked]}>
+            🔒 今日の復習（Premium）
+          </Text>
+          <Text style={styles.reviewCardSub}>間違えやすい問題を最適なタイミングで再出題</Text>
+        </Pressable>
+      ) : null}
+
       {sorted && sorted.length > 0 && (
         <View style={styles.toolbar}>
           <Pressable style={styles.toolBtn} onPress={pickSort} hitSlop={6}>
@@ -815,6 +846,19 @@ const styles = StyleSheet.create({
   listName: { fontSize: 15, fontWeight: "600", color: colors.text },
   footer: { flexDirection: "row", justifyContent: "space-around", paddingVertical: 10 },
   footerLinkText: { color: colors.muted, fontSize: 13 },
+  reviewCard: {
+    marginBottom: 10,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#0f766e",
+    backgroundColor: "rgba(15,118,110,0.08)",
+    gap: 4,
+  },
+  reviewCardLocked: { borderColor: colors.border, backgroundColor: colors.surface },
+  reviewCardTitle: { fontSize: 16, fontWeight: "800", color: "#0f766e" },
+  reviewCardTitleLocked: { color: colors.muted },
+  reviewCardSub: { fontSize: 12.5, color: colors.muted, lineHeight: 18 },
   cloudSection: {
     marginTop: 8,
     paddingTop: 14,

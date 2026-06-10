@@ -5,7 +5,7 @@
 // backend — ANTHROPIC_API_KEY must be set on Production.)
 import { authedFetch } from "../sync/api";
 import { getMeta, putBookQuestions, savePageQuestions, setMeta } from "../db/repo";
-import type { QuestionRow } from "../db/rows";
+import type { QuestionRow, Qtype } from "../db/rows";
 
 export type Density = "auto" | "few" | "normal" | "many";
 
@@ -36,7 +36,9 @@ export class AiUnavailableError extends Error {
 interface ServerQ {
   id: string;
   statement: string;
-  answer: "正" | "誤";
+  answer: string;
+  qtype?: string;
+  choices?: string[] | null;
   explanation?: string;
   source?: string;
 }
@@ -50,6 +52,7 @@ export async function getGenUsage(): Promise<GenUsage> {
 export async function generatePage(opts: {
   bookId: string;
   pageIndex: number;
+  qtype: Qtype;
   pageText: string;
   markedTerms: string[];
   density: Density;
@@ -65,6 +68,7 @@ export async function generatePage(opts: {
     body: JSON.stringify({
       bookId: opts.bookId,
       pageIndex: opts.pageIndex,
+      qtype: opts.qtype,
       pageText: opts.pageText,
       markedTerms: opts.markedTerms,
       density: opts.density,
@@ -86,14 +90,33 @@ export async function generatePage(opts: {
     id: q.id,
     bookId: opts.bookId,
     pageIndex: opts.pageIndex,
+    qtype: opts.qtype,
     statement: q.statement,
-    answer: q.answer === "誤" ? "誤" : "正",
+    answer: q.answer,
+    choices: opts.qtype === "mc4" && Array.isArray(q.choices) ? q.choices : null,
     explanation: q.explanation ?? "",
     source: q.source ?? "",
     createdAt: now,
   }));
-  await savePageQuestions(opts.bookId, opts.pageIndex, rows);
+  await savePageQuestions(opts.bookId, opts.pageIndex, opts.qtype, rows);
   return { questions: rows, remaining: data.remaining, cached: data.cached };
+}
+
+/** Delete one (page × type) group on the server too (Pro+ keeps questions in D1 — without this a
+ * local delete would resurrect on the next cloud restore). Best-effort. */
+export async function deleteCloudQuestions(
+  bookId: string,
+  pageIndex: number,
+  qtype: Qtype,
+): Promise<void> {
+  try {
+    await authedFetch(
+      `/questions?bookId=${encodeURIComponent(bookId)}&pageIndex=${pageIndex}&qtype=${qtype}`,
+      { method: "DELETE" },
+    );
+  } catch {
+    /* offline → the cloud copy survives; acceptable (re-delete later) */
+  }
 }
 
 /** Pro+ restore: pull a book's whole question set from D1 onto this device. Best-effort. */
@@ -109,8 +132,10 @@ export async function restoreCloudQuestions(bookId: string): Promise<void> {
     questions: {
       id: string;
       page_index: number;
+      qtype?: string;
       statement: string;
       answer: string;
+      choices?: string[] | null;
       explanation?: string;
       source?: string;
       created_at?: number;
@@ -121,8 +146,10 @@ export async function restoreCloudQuestions(bookId: string): Promise<void> {
     id: q.id,
     bookId,
     pageIndex: q.page_index,
+    qtype: q.qtype === "mc4" ? "mc4" : "tf",
     statement: q.statement,
-    answer: q.answer === "誤" ? "誤" : "正",
+    answer: q.answer,
+    choices: q.qtype === "mc4" && Array.isArray(q.choices) ? q.choices : null,
     explanation: q.explanation ?? "",
     source: q.source ?? "",
     createdAt: q.created_at ?? Date.now(),

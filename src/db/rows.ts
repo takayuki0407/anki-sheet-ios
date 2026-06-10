@@ -47,14 +47,36 @@ export interface BookmarkRow {
   createdAt: number;
 }
 
-/** An AI-generated true/false (○×) question, keyed by the cross-device bookId (syncs for Pro+). */
+/** AI question type: ○× (true/false) or 4択 (multiple choice). The two sets on a page are
+ * generated and managed independently. */
+export type Qtype = "tf" | "mc4";
+
+/** An AI-generated question, keyed by the cross-device bookId (syncs for Pro+). One page holds at
+ * most 6 per type; regeneration replaces one (page × type) group. */
 export interface QuestionRow {
   id: string;
   bookId: string;
   pageIndex: number;
-  statement: string;
-  answer: "正" | "誤";
+  qtype: Qtype;
+  statement: string; // tf: 記述文 / mc4: 設問文
+  answer: string; // tf: '正'|'誤' / mc4: 正解の選択肢文字列
+  choices: string[] | null; // mc4 only (4 entries; stored as JSON TEXT in sqlite)
   explanation: string;
   source: string;
   createdAt: number;
+}
+
+/** Local SM-2 / answer-history record for one question (機能拡張 §A-2). All plans record locally
+ * (drives 間違いのみ復習); Premium also syncs these (今日の復習). Semantics in sync/srs.ts. */
+export interface ReviewRow {
+  questionId: string;
+  bookId: string;
+  ease: number;
+  intervalD: number;
+  reps: number;
+  lapses: number;
+  dueAt: number;
+  lastAt: number;
+  lastOk: 0 | 1;
+  updatedAt: number;
 }

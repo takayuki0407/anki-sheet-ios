@@ -3,7 +3,7 @@
 // here, and PDFs are moved to disk on import.
 import type { SQLiteDatabase } from "expo-sqlite";
 import { DEFAULT_MAGENTA_BAND, type DeckColorConfig, type DetectedCloze, type Rect } from "../types";
-import type { BookmarkRow, CardRow, DeckRow, PdfRow, QuestionRow, ReadMode } from "./rows";
+import type { BookmarkRow, CardRow, DeckRow, PdfRow, QuestionRow, Qtype, ReadMode, ReviewRow } from "./rows";
 import { getDb, withWriteLock } from "./database";
 import { deckPdfFile, deleteDeckPdf, savePdfForDeck } from "./files";
 import { cardKey, correspondCards } from "../sync/cardKeys";
@@ -518,65 +518,155 @@ export async function setMeta(key: string, value: string): Promise<void> {
   await db.runAsync("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [key, value]);
 }
 
-// ---- AI-generated ○× questions (keyed by the cross-device bookId) ----
+// ---- AI-generated questions (keyed by the cross-device bookId) ----
 
 const Q_COLS =
-  "id, bookId, pageIndex, statement, answer, explanation, source, createdAt";
+  "id, bookId, pageIndex, qtype, statement, answer, choices, explanation, source, createdAt";
 const Q_INSERT =
-  "INSERT OR REPLACE INTO questions (id, bookId, pageIndex, statement, answer, explanation, source, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-const qBinds = (q: QuestionRow): (string | number)[] => [
+  "INSERT OR REPLACE INTO questions (id, bookId, pageIndex, qtype, statement, answer, choices, explanation, source, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+const qBinds = (q: QuestionRow): (string | number | null)[] => [
   q.id,
   q.bookId,
   q.pageIndex,
+  q.qtype,
   q.statement,
   q.answer,
+  q.choices ? JSON.stringify(q.choices) : null,
   q.explanation,
   q.source,
   q.createdAt,
 ];
+/** sqlite row → QuestionRow (choices TEXT → array; legacy rows have qtype='tf'/choices NULL). */
+function qFromRow(r: Omit<QuestionRow, "qtype" | "choices"> & { qtype: string; choices: string | null }): QuestionRow {
+  let choices: string[] | null = null;
+  if (r.choices) {
+    try {
+      const parsed = JSON.parse(r.choices) as unknown;
+      if (Array.isArray(parsed)) choices = parsed.filter((c): c is string => typeof c === "string");
+    } catch {
+      /* corrupt → treat as tf-style */
+    }
+  }
+  return { ...r, qtype: r.qtype === "mc4" ? "mc4" : "tf", choices };
+}
+type QSqlRow = Omit<QuestionRow, "qtype" | "choices"> & { qtype: string; choices: string | null };
 
-/** Replace one page's questions (initial generation or regeneration). */
+/** Replace one (page × type) question group (initial generation or regeneration). The other
+ * type's questions on the same page are untouched; reviews of the replaced ids go with them. */
 export async function savePageQuestions(
   bookId: string,
   pageIndex: number,
+  qtype: Qtype,
   qs: QuestionRow[],
 ): Promise<void> {
   const db = await getDb();
   await withWriteLock(async () => {
-    await db.runAsync("DELETE FROM questions WHERE bookId = ? AND pageIndex = ?", [bookId, pageIndex]);
+    await db.runAsync(
+      "DELETE FROM reviews WHERE questionId IN (SELECT id FROM questions WHERE bookId = ? AND pageIndex = ? AND qtype = ?)",
+      [bookId, pageIndex, qtype],
+    );
+    await db.runAsync("DELETE FROM questions WHERE bookId = ? AND pageIndex = ? AND qtype = ?", [
+      bookId,
+      pageIndex,
+      qtype,
+    ]);
     for (const q of qs) await db.runAsync(Q_INSERT, qBinds(q));
   });
+}
+
+/** Delete one (page × type) question group + its reviews (問題一覧の削除). */
+export async function deleteQuestionGroup(
+  bookId: string,
+  pageIndex: number,
+  qtype: Qtype,
+): Promise<void> {
+  await savePageQuestions(bookId, pageIndex, qtype, []);
 }
 
 /** All questions in a book (the quiz set). */
 export async function getBookQuestions(bookId: string): Promise<QuestionRow[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<QuestionRow>(
+  const rows = await db.getAllAsync<QSqlRow>(
     `SELECT ${Q_COLS} FROM questions WHERE bookId = ? ORDER BY pageIndex, createdAt`,
     [bookId],
   );
-  return rows.map((r) => ({ ...r, answer: r.answer === "誤" ? "誤" : "正" }));
+  return rows.map(qFromRow);
 }
 
-/** Per-page question counts for a book. */
-export async function bookQuestionCounts(bookId: string): Promise<Map<number, number>> {
-  const rows = await getBookQuestions(bookId);
-  const m = new Map<number, number>();
-  for (const q of rows) m.set(q.pageIndex, (m.get(q.pageIndex) ?? 0) + 1);
-  return m;
+/** Questions by id (cross-book 今日の復習 session assembly). Preserves the input order. */
+export async function questionsByIds(ids: string[]): Promise<QuestionRow[]> {
+  if (!ids.length) return [];
+  const db = await getDb();
+  const out = new Map<string, QuestionRow>();
+  // Chunk to stay under sqlite's bind-parameter limit.
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const rows = await db.getAllAsync<QSqlRow>(
+      `SELECT ${Q_COLS} FROM questions WHERE id IN (${chunk.map(() => "?").join(",")})`,
+      chunk,
+    );
+    for (const r of rows) out.set(r.id, qFromRow(r));
+  }
+  return ids.map((id) => out.get(id)).filter((q): q is QuestionRow => !!q);
 }
 
-/** Replace ALL of a book's questions (cloud restore for Pro+). */
+/** Replace ALL of a book's questions (cloud restore for Pro+). Reviews of ids that no longer
+ * exist are pruned so a regeneration on another device can't leave orphaned SM-2 state. */
 export async function putBookQuestions(bookId: string, qs: QuestionRow[]): Promise<void> {
   const db = await getDb();
   await withWriteLock(async () => {
     await db.runAsync("DELETE FROM questions WHERE bookId = ?", [bookId]);
     for (const q of qs) await db.runAsync(Q_INSERT, qBinds(q));
+    await db.runAsync(
+      "DELETE FROM reviews WHERE bookId = ? AND questionId NOT IN (SELECT id FROM questions WHERE bookId = ?)",
+      [bookId, bookId],
+    );
   });
 }
 
-/** Delete a book's questions (on book delete). */
+/** Delete a book's questions + reviews (on book delete). */
 export async function deleteBookQuestions(bookId: string): Promise<void> {
   const db = await getDb();
-  await withWriteLock(() => db.runAsync("DELETE FROM questions WHERE bookId = ?", [bookId]));
+  await withWriteLock(async () => {
+    await db.runAsync("DELETE FROM questions WHERE bookId = ?", [bookId]);
+    await db.runAsync("DELETE FROM reviews WHERE bookId = ?", [bookId]);
+  });
+}
+
+// ---- SM-2 review records (機能拡張 §A-2/§D — all plans record locally) ----
+
+const R_COLS = "questionId, bookId, ease, intervalD, reps, lapses, dueAt, lastAt, lastOk, updatedAt";
+
+/** All review records for a book, as a questionId-keyed map. */
+export async function getBookReviews(bookId: string): Promise<Map<string, ReviewRow>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<ReviewRow>(
+    `SELECT ${R_COLS} FROM reviews WHERE bookId = ?`,
+    [bookId],
+  );
+  return new Map(rows.map((r) => [r.questionId, r]));
+}
+
+/** Upsert one review record (after an answer, or from a cloud pull). */
+export async function putReview(r: ReviewRow): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR REPLACE INTO reviews (${R_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [r.questionId, r.bookId, r.ease, r.intervalD, r.reps, r.lapses, r.dueAt, r.lastAt, r.lastOk, r.updatedAt],
+  );
+}
+
+/** All review records (cross-book — drives the 今日の復習 card + sync push). */
+export async function allReviews(): Promise<ReviewRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<ReviewRow>(`SELECT ${R_COLS} FROM reviews`);
+}
+
+/** Due review records across all books, most-overdue first (今日の復習). */
+export async function dueReviews(now: number): Promise<ReviewRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<ReviewRow>(
+    `SELECT ${R_COLS} FROM reviews WHERE dueAt <= ? ORDER BY dueAt`,
+    [now],
+  );
 }

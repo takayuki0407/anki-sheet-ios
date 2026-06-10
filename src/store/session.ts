@@ -10,6 +10,7 @@ export type View =
   // from the viewer → back goes to the book, not the bookshelf). Defaults to the bookshelf.
   | { name: "settings"; deckId: number; from?: View }
   | { name: "quiz"; deckId: number; from?: View }
+  | { name: "review" } // 今日の復習 (cross-book SM-2 session)
   | { name: "paywall" }
   | { name: "info" }
   | { name: "login" }
