@@ -3,7 +3,9 @@
 // subscription, to exercise plan behavior. The backend rejects non-admins (verified token), so this
 // is only UI visibility. It also mirrors the new tier into the LOCAL entitlement so the in-app plan
 // display + paywall match. Placed in Info AND on the forced-trim screen (to escape an over-limit
-// state by switching back up). Shown in __DEV__ builds, or to the admin email in any build.
+// state by switching back up). Shown ONLY to the admin email — non-admin accounts never see it
+// (a __DEV__ bypass used to show it to any signed-in account in dev builds; the server rejected
+// their taps with 403, but the visible panel was confusing).
 import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useAccount } from "../auth/account";
@@ -24,7 +26,7 @@ export function DevTierSwitch() {
   const bumpDecks = useApp((s) => s.bumpDecks);
   const [busy, setBusy] = useState(false);
   const isAdmin = user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-  if (!__DEV__ && !isAdmin) return null;
+  if (!isAdmin) return null;
 
   const apply = async (tier: AccountTier, downgradedAt?: number | null) => {
     if (busy) return;
