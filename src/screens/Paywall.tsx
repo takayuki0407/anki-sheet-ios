@@ -81,18 +81,18 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         <View style={styles.plans}>
           <View style={styles.plan}>
             <Text style={styles.planName}>Standard</Text>
-            <Text style={styles.planPrice}>¥300/月 ・ ¥2,500/年</Text>
+            <Text style={styles.planPrice}>¥300/月 ・ ¥3,000/年</Text>
             <Text style={styles.planDesc}>本を {STANDARD_DECK_LIMIT} 冊まで取り込み・AI問題生成 月10回</Text>
           </View>
           <View style={styles.plan}>
             <Text style={styles.planName}>Pro</Text>
-            <Text style={styles.planPrice}>¥600/月 ・ ¥5,000/年</Text>
+            <Text style={styles.planPrice}>¥600/月 ・ ¥6,000/年</Text>
             <Text style={styles.planDesc}>本を無制限に取り込み・クラウドストレージ5GB・全ての端末/プラットフォームで進捗同期・AI問題生成 月30回</Text>
           </View>
           <View style={[styles.plan, styles.planPro]}>
             <Text style={styles.planName}>Premium</Text>
-            <Text style={styles.planPrice}>¥980/月 ・ ¥8,000/年</Text>
-            <Text style={styles.planDesc}>Proの全機能＋AI問題生成 月200回・「今日の復習」（間違えやすい問題を最適なタイミングで再出題）・初回7日間無料</Text>
+            <Text style={styles.planPrice}>¥980/月 ・ ¥9,800/年</Text>
+            <Text style={styles.planDesc}>Proの全機能＋AI問題生成 月100回・「今日の復習」（間違えやすい問題を最適なタイミングで再出題）・初回7日間無料</Text>
           </View>
         </View>
 
