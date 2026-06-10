@@ -68,7 +68,7 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
       )}
       <View style={styles.body}>
         <Text style={styles.title}>Kiokumate を始める</Text>
-        <Text style={styles.lead}>まず7日間は無料。いつでも解約できます。</Text>
+        <Text style={styles.lead}>無料で1冊から。Proは初回7日間無料・いつでも解約できます。</Text>
         {locked && user ? (
           <Text style={styles.accountNote}>
             ログイン中: {user.email ?? "Apple ID"}（有効なサブスクリプションは見つかりませんでした）
@@ -81,12 +81,12 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         <View style={styles.plans}>
           <View style={styles.plan}>
             <Text style={styles.planName}>Standard</Text>
-            <Text style={styles.planPrice}>¥300/月 ・ ¥3,000/年</Text>
+            <Text style={styles.planPrice}>¥300/月 ・ ¥2,500/年</Text>
             <Text style={styles.planDesc}>本を {STANDARD_DECK_LIMIT} 冊まで取り込み</Text>
           </View>
           <View style={[styles.plan, styles.planPro]}>
             <Text style={styles.planName}>Pro</Text>
-            <Text style={styles.planPrice}>¥600/月 ・ ¥6,000/年</Text>
+            <Text style={styles.planPrice}>¥600/月 ・ ¥5,000/年</Text>
             <Text style={styles.planDesc}>本を無制限に取り込み＋クラウドストレージ5GB・全ての端末/プラットフォームで進捗同期</Text>
           </View>
         </View>
@@ -122,9 +122,10 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         </Pressable>
 
         <Text style={styles.disclosure}>
-          7日間の無料トライアル付き。トライアル終了時、解約しない限り選択したプランの料金が自動で請求
-          されます。サブスクリプションは、現在の期間終了の24時間前までに自動更新をオフにしない限り自動
-          更新されます。更新の管理・解約はiOSの「設定」→ Apple ID →「サブスクリプション」から行えます。
+          Proには初回のみ7日間の無料トライアルが付きます。トライアル終了時、解約しない限りProの料金が
+          自動で請求されます。サブスクリプションは、現在の期間終了の24時間前までに自動更新をオフにしない
+          限り自動更新されます。更新の管理・解約はiOSの「設定」→ Apple ID →「サブスクリプション」から
+          行えます。
         </Text>
         <View style={styles.legalRow}>
           <Pressable onPress={() => Linking.openURL(TERMS_URL)} hitSlop={6}>

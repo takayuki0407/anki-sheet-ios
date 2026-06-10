@@ -292,7 +292,7 @@ function GenerateTab({
         if (ok) return resolve(true);
         Alert.alert(
           "AI問題生成について",
-          "この機能では、選んだページの本文と暗記語句を、当アプリのサーバー経由で AI（Anthropic）に送信して問題を作成します。赤シート・色の検出など他の機能は、これまでどおり端末内だけで完結します。\n\n同意して続けますか？",
+          "この機能では、選んだページの本文と暗記語句を、当アプリのサーバー経由で外部のAIに送信して問題を作成します。生成された問題は誤りを含む場合があります。赤シート・色の検出など他の機能は、これまでどおり端末内だけで完結します。\n\n同意して続けますか？",
           [
             { text: "キャンセル", style: "cancel", onPress: () => resolve(false) },
             { text: "同意して続ける", onPress: () => void setAiConsent().then(() => resolve(true)) },
@@ -415,6 +415,9 @@ function GenerateTab({
       </View>
       <Text style={styles.muted}>
         生成済み {genCount} / {pages.length} ページ。暗記箇所のあるページを選んで「まとめて生成」（生成済みは枠を消費しません）。
+      </Text>
+      <Text style={styles.muted}>
+        ⚠ 生成された問題はAIによるもので、誤りを含む場合があります。内容は必ずご自身で確認してください。
       </Text>
     </View>
   );
