@@ -485,7 +485,7 @@ function ListTab({
     if (!bookId || !pdfUrl || busyKey) return;
     Alert.alert(
       "再生成",
-      `P.${page + 1} の${qtypeShort(qtype)}問題を作り直します（今の問題は置き換わります。枠は消費しません）。よろしいですか？`,
+      `P.${page + 1} の${qtypeShort(qtype)}問題を作り直します（今の問題は置き換わり、生成枠を1回消費します）。よろしいですか？`,
       [
         { text: "キャンセル", style: "cancel" },
         {
