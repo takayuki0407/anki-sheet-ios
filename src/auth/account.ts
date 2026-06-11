@@ -16,7 +16,7 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import Purchases from "react-native-purchases";
 import { getFirebaseAuth, isAuthConfigured } from "./firebase";
-import { syncCustomerInfo } from "../iap/purchases";
+import { initPurchases, syncCustomerInfo } from "../iap/purchases";
 import { deleteAccountData } from "../sync/api";
 import { getMeta, setMeta } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
@@ -70,6 +70,9 @@ export function initAuthListener(): void {
     // can't briefly lock a subscriber out on logout or miss a web entitlement on login.
     (async () => {
       try {
+        // Wait for configure() — at cold start this listener can fire before RC is configured,
+        // and a thrown logIn here would leave purchases attributed to an anonymous id.
+        if (!(await initPurchases())) return; // RC not configured (Expo Go / placeholder key)
         if (u) {
           const { customerInfo } = await Purchases.logIn(u.uid);
           syncCustomerInfo(customerInfo);
@@ -78,7 +81,7 @@ export function initAuthListener(): void {
           syncCustomerInfo(customerInfo);
         }
       } catch {
-        /* RevenueCat not configured yet */
+        /* offline / already-anonymous logOut — the update listener resyncs later */
       }
     })();
   });

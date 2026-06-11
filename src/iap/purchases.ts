@@ -87,10 +87,22 @@ export async function getCurrentOffering(): Promise<PurchasesOffering | null> {
   }
 }
 
-/** Purchase a package. Returns the resulting tier ("free" if cancelled or not granted). */
-export async function purchase(pkg: PurchasesPackage): Promise<Tier> {
+/** Attribute the RC subscriber to the signed-in account BEFORE talking to the store. The server
+ * webhook keys `users.tier` on the event's app_user_id — an anonymous purchase only reaches the
+ * account at the NEXT billing event (up to a month later). This also heals the boot race where
+ * account.ts's logIn ran before configure() and was silently swallowed. */
+async function ensureIdentified(uid: string): Promise<void> {
+  if ((await Purchases.getAppUserID()) === uid) return;
+  const { customerInfo } = await Purchases.logIn(uid);
+  syncCustomerInfo(customerInfo);
+}
+
+/** Purchase a package for the signed-in account (callers must gate on login first).
+ * Returns the resulting tier ("free" if cancelled or not granted). */
+export async function purchase(pkg: PurchasesPackage, uid: string): Promise<Tier> {
   if (!(await initPurchases())) throw new Error("購入を利用できません（設定が必要です）");
   try {
+    await ensureIdentified(uid);
     const { customerInfo } = await Purchases.purchasePackage(pkg);
     syncCustomerInfo(customerInfo);
     return tierOf(customerInfo);
@@ -100,9 +112,11 @@ export async function purchase(pkg: PurchasesPackage): Promise<Tier> {
   }
 }
 
-/** Restore purchases. Returns the resulting tier ("free" if nothing to restore). */
-export async function restore(): Promise<Tier> {
+/** Restore purchases onto the signed-in account (callers must gate on login first).
+ * Returns the resulting tier ("free" if nothing to restore). */
+export async function restore(uid: string): Promise<Tier> {
   if (!(await initPurchases())) return "free";
+  await ensureIdentified(uid);
   const info = await Purchases.restorePurchases();
   syncCustomerInfo(info);
   return tierOf(info);

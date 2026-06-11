@@ -136,13 +136,22 @@ export function Info() {
   }, []);
 
   const doRestore = useCallback(async () => {
+    // Account-bound restore: without a signed-in uid the entitlement would land on an anonymous
+    // RC id and the server tier wouldn't unlock (see Paywall.requireUser).
+    if (!user) {
+      Alert.alert("ログインが必要です", "購入の復元はアカウントに紐付けるため、先にログインしてください。", [
+        { text: "ログインへ", onPress: () => setView({ name: "login" }) },
+        { text: "キャンセル", style: "cancel" },
+      ]);
+      return;
+    }
     try {
-      const tier = await restore();
+      const tier = await restore(user.uid);
       Alert.alert(tier !== "free" ? "復元しました" : "復元できる購入が見つかりません");
     } catch (e) {
       Alert.alert("エラー", e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [user, setView]);
 
   const onSignOut = useCallback(() => {
     Alert.alert(
