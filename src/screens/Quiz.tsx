@@ -30,9 +30,11 @@ import {
   getDeck,
   getDeckPdf,
   getMeta,
+  listBookmarks,
   setMeta,
 } from "../db/repo";
 import { deckBookId } from "../sync/deck";
+import { pageTopics } from "../sync/topics";
 import {
   AiUnavailableError,
   QuotaError,
@@ -183,6 +185,40 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
 
   const premium = usage?.tier === "premium" || usage?.tier === "admin";
 
+  // Topic labels for pages that have questions ("P.14" alone doesn't tell the user which chapter
+  // it is): the deck's 目次 (bookmarks) first, page-text heading heuristic as fallback.
+  const [topics, setTopics] = useState<Map<number, string>>(new Map());
+  const topicPagesKey = useMemo(
+    () => [...new Set(questions.map((q) => q.pageIndex))].sort((a, b) => a - b).join(","),
+    [questions],
+  );
+  useEffect(() => {
+    if (!topicPagesKey) {
+      setTopics(new Map());
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const pages = topicPagesKey.split(",").map(Number);
+      const marks = await listBookmarks(deckId).catch(() => []);
+      const texts = new Map<number, string>();
+      if (engine.ready && pdfUrl) {
+        try {
+          const got = await engine.pageText({ url: pdfUrl, pages });
+          for (const t of got) texts.set(t.page, t.text);
+        } catch {
+          /* labels fall back to the 目次 only */
+        }
+      }
+      for (const p of pages) if (!texts.has(p)) texts.set(p, "");
+      if (live) setTopics(pageTopics(texts, marks));
+    })();
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicPagesKey, engine.ready, pdfUrl, deckId]);
+
   const startPractice = (rows: QuestionRow[]) => {
     setPendingSession(rows);
     setTab("solve");
@@ -218,6 +254,7 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
           questions={questions}
           reviews={reviews}
           premium={premium}
+          topics={topics}
           pendingSession={pendingSession}
           clearPending={() => setPendingSession(null)}
           onAnswered={refreshReviews}
@@ -232,6 +269,7 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
           pageCount={pageCount}
           engine={engine}
           termsByPage={termsByPage}
+          topics={topics}
           onChanged={async () => {
             if (bookId) await reloadQuestions(bookId);
             refreshUsage();
@@ -276,6 +314,7 @@ function PracticeTab({
   questions,
   reviews,
   premium,
+  topics,
   pendingSession,
   clearPending,
   onAnswered,
@@ -285,6 +324,7 @@ function PracticeTab({
   questions: QuestionRow[];
   reviews: Map<string, ReviewRow>;
   premium: boolean;
+  topics: Map<number, string>;
   pendingSession: QuestionRow[] | null;
   clearPending: () => void;
   onAnswered: () => void;
@@ -345,6 +385,7 @@ function PracticeTab({
   const target = matches(ptype, mode);
   const wrongCount = matches(ptype, "wrong").length;
   const dueCount = matches(ptype, "due").length;
+  const targetPages = [...new Set(target.map((q) => q.pageIndex))].sort((a, b) => a - b);
 
   return (
     <ScrollView contentContainerStyle={styles.setup}>
@@ -422,6 +463,17 @@ function PracticeTab({
         </View>
       </View>
 
+      {targetPages.length ? (
+        <Text style={styles.rangeTopics}>
+          出題範囲：
+          {targetPages
+            .slice(0, 6)
+            .map((p) => `P.${p + 1}${topics.get(p) ? `「${topics.get(p)}」` : ""}`)
+            .join(" ・ ")}
+          {targetPages.length > 6 ? ` ほか${targetPages.length - 6}ページ` : ""}
+        </Text>
+      ) : null}
+
       <Pressable
         style={[styles.primary, !target.length && styles.disabled]}
         disabled={!target.length}
@@ -445,6 +497,7 @@ function ListTab({
   pageCount,
   engine,
   termsByPage,
+  topics,
   onChanged,
   onPractice,
 }: {
@@ -454,6 +507,7 @@ function ListTab({
   pageCount: number;
   engine: ReturnType<typeof useDetectionEngine>;
   termsByPage: Map<number, string[]>;
+  topics: Map<number, string>;
   onChanged: () => Promise<void> | void;
   onPractice: (rows: QuestionRow[]) => void;
 }) {
@@ -556,7 +610,10 @@ function ListTab({
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
       {byPage.map(([page, g]) => (
         <View style={styles.listPage} key={page}>
-          <Text style={styles.listPageHead}>P.{page + 1}</Text>
+          <Text style={styles.listPageHead} numberOfLines={1}>
+            P.{page + 1}
+            {topics.get(page) ? <Text style={styles.listTopic}>　{topics.get(page)}</Text> : null}
+          </Text>
           {(["tf", "mc4"] as Qtype[]).map((t) => {
             const qs = g[t];
             if (!qs.length) return null;
@@ -1153,6 +1210,8 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 16, gap: 8 },
   listPage: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, overflow: "hidden" },
   listPageHead: { paddingHorizontal: 12, paddingVertical: 8, fontWeight: "800", color: colors.text, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  listTopic: { fontWeight: "600", fontSize: 12, color: colors.muted },
+  rangeTopics: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 2 },
   listGroup: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   listGroupHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8 },
   listGroupTitle: { fontSize: 14, fontWeight: "700", color: colors.text },

@@ -226,6 +226,9 @@ export function ImportWizard() {
           <Text style={styles.help}>
             赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選び、次の画面で答えの色（自動／赤・マゼンタなど）を選んで検出します。
           </Text>
+          <Text style={styles.muted}>
+            ※スキャン画像のPDF（文字を選択できない・テキスト情報のないもの）には対応していません。
+          </Text>
           <Pressable style={styles.primary} onPress={pick} disabled={!engine.ready}>
             <Text style={styles.primaryText}>{engine.ready ? "PDFを選ぶ" : "エンジン準備中…"}</Text>
           </Pressable>
@@ -274,6 +277,12 @@ export function ImportWizard() {
             {result.pageCount} ページ
             {result.outline.length > 0 ? ` ・ 目次 ${result.outline.length} 件を取り込み` : ""}
           </Text>
+          {result.clozes.length === 0 ? (
+            <Text style={styles.muted}>
+              答えが見つかりませんでした。色を変えて再検出をお試しください。なお、スキャン画像のPDF
+              （テキスト情報のないもの）は検出・AI問題生成に対応していません。
+            </Text>
+          ) : null}
 
           <View style={styles.previewBox}>
             {preview ? (
