@@ -6,7 +6,7 @@
 //   問題を作る (gen) — pick the question TYPE (○×/4択) + pages and generate in bulk, with a
 //                      progress panel + per-page status overlays. One generation = page × type.
 // Page text comes from the WebView engine (engine.pageText), thumbnails from engine.cover.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -34,7 +34,7 @@ import {
   setMeta,
 } from "../db/repo";
 import { deckBookId } from "../sync/deck";
-import { pageTopics } from "../sync/topics";
+import { TOPICS_VERSION, extractHeadings, pageTopics, type TopicBookmark } from "../sync/topics";
 import {
   AiUnavailableError,
   QuotaError,
@@ -186,38 +186,74 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
   const premium = usage?.tier === "premium" || usage?.tier === "admin";
 
   // Topic labels for pages that have questions ("P.14" alone doesn't tell the user which chapter
-  // it is): the deck's 目次 (bookmarks) first, page-text heading heuristic as fallback.
+  // it is). The deck's real 目次 (bookmarks) wins; otherwise a TOC is auto-detected from the whole
+  // book's text once and cached in meta. Labels carry forward (see src/sync/topics.ts).
+  // `topicSource` drives the hint that nudges users toward maintaining the 目次 themselves.
   const [topics, setTopics] = useState<Map<number, string>>(new Map());
+  const [topicSource, setTopicSource] = useState<TopicSource>("none");
   const topicPagesKey = useMemo(
     () => [...new Set(questions.map((q) => q.pageIndex))].sort((a, b) => a - b).join(","),
     [questions],
   );
   useEffect(() => {
-    if (!topicPagesKey) {
+    if (!topicPagesKey || !pageCount) {
       setTopics(new Map());
       return;
     }
     let live = true;
     void (async () => {
       const pages = topicPagesKey.split(",").map(Number);
-      const marks = await listBookmarks(deckId).catch(() => []);
-      const texts = new Map<number, string>();
-      if (engine.ready && pdfUrl) {
+      let toc: TopicBookmark[] = (await listBookmarks(deckId).catch(() => [])).filter((b) =>
+        b.title.trim(),
+      );
+      const fromBookmarks = toc.length > 0;
+      if (!toc.length) {
+        const cacheKey = `autoToc:${deckId}`;
+        let cachedValid = false;
         try {
-          const got = await engine.pageText({ url: pdfUrl, pages });
-          for (const t of got) texts.set(t.page, t.text);
+          const cached = JSON.parse((await getMeta(cacheKey)) ?? "null") as {
+            v?: number;
+            pageCount: number;
+            toc: TopicBookmark[];
+          } | null;
+          if (cached && cached.v === TOPICS_VERSION && cached.pageCount === pageCount) {
+            toc = cached.toc;
+            cachedValid = true;
+          }
         } catch {
-          /* labels fall back to the 目次 only */
+          /* recompute below */
+        }
+        if (!cachedValid && engine.ready && pdfUrl) {
+          const texts = new Map<number, string>();
+          try {
+            for (let start = 0; start < pageCount && live; start += 50) {
+              const chunk = Array.from(
+                { length: Math.min(50, pageCount - start) },
+                (_, i) => start + i,
+              );
+              const got = await engine.pageText({ url: pdfUrl, pages: chunk });
+              for (const t of got) texts.set(t.page, t.text);
+            }
+            if (!live) return;
+            toc = extractHeadings(texts);
+            await setMeta(cacheKey, JSON.stringify({ v: TOPICS_VERSION, pageCount, toc }));
+          } catch {
+            /* no labels this time — retried on next open */
+          }
         }
       }
-      for (const p of pages) if (!texts.has(p)) texts.set(p, "");
-      if (live) setTopics(pageTopics(texts, marks));
+      if (live) {
+        setTopics(pageTopics(pages, toc));
+        setTopicSource(toc.length ? (fromBookmarks ? "bookmarks" : "auto") : "none");
+      }
     })();
     return () => {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topicPagesKey, engine.ready, pdfUrl, deckId]);
+  }, [topicPagesKey, engine.ready, pdfUrl, pageCount, deckId]);
+
+  const openToc = useCallback(() => setView({ name: "viewer", deckId }), [setView, deckId]);
 
   const startPractice = (rows: QuestionRow[]) => {
     setPendingSession(rows);
@@ -255,6 +291,8 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
           reviews={reviews}
           premium={premium}
           topics={topics}
+          topicSource={topicSource}
+          onOpenToc={openToc}
           pendingSession={pendingSession}
           clearPending={() => setPendingSession(null)}
           onAnswered={refreshReviews}
@@ -270,6 +308,8 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
           engine={engine}
           termsByPage={termsByPage}
           topics={topics}
+          topicSource={topicSource}
+          onOpenToc={openToc}
           onChanged={async () => {
             if (bookId) await reloadQuestions(bookId);
             refreshUsage();
@@ -305,6 +345,25 @@ function Tab({ label, on, onPress }: { label: string; on: boolean; onPress: () =
   );
 }
 
+/** Where the chapter labels came from — drives the "maintain your own 目次" nudge. */
+type TopicSource = "bookmarks" | "auto" | "none";
+
+function TocHint({ source, onOpen }: { source: TopicSource; onOpen: () => void }) {
+  return (
+    <Text style={styles.muted}>
+      {source === "bookmarks"
+        ? "章の見出しはこの本の目次（しおり）にもとづいています。編集すると、ここにも反映されます。"
+        : source === "auto"
+          ? "章の見出しは本文からの自動推定です。目次（しおり）を作ると、そちらが優先され正確になります。"
+          : "目次（しおり）を追加すると、問題を章ごとに表示できます。"}
+      <Text style={styles.tocLink} onPress={onOpen}>
+        {" "}
+        目次を開く →
+      </Text>
+    </Text>
+  );
+}
+
 // ---- 演習タブ（開始設定 → セッション） ---------------------------------------------------------
 
 type PracticeType = "tf" | "mc4" | "both";
@@ -315,6 +374,8 @@ function PracticeTab({
   reviews,
   premium,
   topics,
+  topicSource,
+  onOpenToc,
   pendingSession,
   clearPending,
   onAnswered,
@@ -325,6 +386,8 @@ function PracticeTab({
   reviews: Map<string, ReviewRow>;
   premium: boolean;
   topics: Map<number, string>;
+  topicSource: TopicSource;
+  onOpenToc: () => void;
   pendingSession: QuestionRow[] | null;
   clearPending: () => void;
   onAnswered: () => void;
@@ -385,7 +448,24 @@ function PracticeTab({
   const target = matches(ptype, mode);
   const wrongCount = matches(ptype, "wrong").length;
   const dueCount = matches(ptype, "due").length;
-  const targetPages = [...new Set(target.map((q) => q.pageIndex))].sort((a, b) => a - b);
+
+  // Group the current target by chapter label (pages without a label stand alone as "P.x"),
+  // so the user can see at a glance WHAT is in range — and tap a chapter to drill just it.
+  const chapterGroups: { key: string; title: string; rows: QuestionRow[] }[] = [];
+  {
+    const idx = new Map<string, number>();
+    for (const q of target) {
+      const label = topics.get(q.pageIndex);
+      const key = label ?? `p${q.pageIndex}`;
+      const at = idx.get(key);
+      if (at === undefined) {
+        idx.set(key, chapterGroups.length);
+        chapterGroups.push({ key, title: label ?? `P.${q.pageIndex + 1}`, rows: [q] });
+      } else {
+        chapterGroups[at].rows.push(q);
+      }
+    }
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.setup}>
@@ -463,16 +543,23 @@ function PracticeTab({
         </View>
       </View>
 
-      {targetPages.length ? (
-        <Text style={styles.rangeTopics}>
-          出題範囲：
-          {targetPages
-            .slice(0, 6)
-            .map((p) => `P.${p + 1}${topics.get(p) ? `「${topics.get(p)}」` : ""}`)
-            .join(" ・ ")}
-          {targetPages.length > 6 ? ` ほか${targetPages.length - 6}ページ` : ""}
-        </Text>
+      {chapterGroups.length ? (
+        <View style={styles.genRow}>
+          <Text style={styles.genLabel}>内容</Text>
+          <View style={styles.chapterChips}>
+            {chapterGroups.map((c) => (
+              <Pressable key={c.key} style={styles.chapterChip} onPress={() => setSession(c.rows)}>
+                <Text style={styles.chapterChipTitle}>{c.title}</Text>
+                <Text style={styles.chapterChipCount}>{c.rows.length}問</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
       ) : null}
+      {chapterGroups.length ? (
+        <Text style={styles.muted}>章をタップすると、その範囲だけすぐに演習できます。</Text>
+      ) : null}
+      <TocHint source={topicSource} onOpen={onOpenToc} />
 
       <Pressable
         style={[styles.primary, !target.length && styles.disabled]}
@@ -498,6 +585,8 @@ function ListTab({
   engine,
   termsByPage,
   topics,
+  topicSource,
+  onOpenToc,
   onChanged,
   onPractice,
 }: {
@@ -508,6 +597,8 @@ function ListTab({
   engine: ReturnType<typeof useDetectionEngine>;
   termsByPage: Map<number, string[]>;
   topics: Map<number, string>;
+  topicSource: TopicSource;
+  onOpenToc: () => void;
   onChanged: () => Promise<void> | void;
   onPractice: (rows: QuestionRow[]) => void;
 }) {
@@ -607,13 +698,15 @@ function ListTab({
       <Text style={styles.muted}>
         ○× {tfTotal}問 ・ 4択 {mc4Total}問
       </Text>
+      <TocHint source={topicSource} onOpen={onOpenToc} />
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
-      {byPage.map(([page, g]) => (
-        <View style={styles.listPage} key={page}>
-          <Text style={styles.listPageHead} numberOfLines={1}>
-            P.{page + 1}
-            {topics.get(page) ? <Text style={styles.listTopic}>　{topics.get(page)}</Text> : null}
-          </Text>
+      {byPage.map(([page, g], i) => (
+        <Fragment key={page}>
+          {topics.get(page) && topics.get(page) !== (i > 0 ? topics.get(byPage[i - 1][0]) : undefined) ? (
+            <Text style={styles.listChapter}>{topics.get(page)}</Text>
+          ) : null}
+        <View style={styles.listPage}>
+          <Text style={styles.listPageHead}>P.{page + 1}</Text>
           {(["tf", "mc4"] as Qtype[]).map((t) => {
             const qs = g[t];
             if (!qs.length) return null;
@@ -663,6 +756,7 @@ function ListTab({
             );
           })}
         </View>
+        </Fragment>
       ))}
     </ScrollView>
   );
@@ -1210,8 +1304,22 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 16, gap: 8 },
   listPage: { borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, overflow: "hidden" },
   listPageHead: { paddingHorizontal: 12, paddingVertical: 8, fontWeight: "800", color: colors.text, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  listTopic: { fontWeight: "600", fontSize: 12, color: colors.muted },
-  rangeTopics: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 2 },
+  listChapter: { marginTop: 10, marginBottom: 2, marginHorizontal: 2, fontSize: 14.5, fontWeight: "800", color: colors.text },
+  tocLink: { color: colors.ocean, textDecorationLine: "underline" },
+  chapterChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, flexShrink: 1, flex: 1 },
+  chapterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
+  },
+  chapterChipTitle: { fontSize: 13.5, fontWeight: "700", color: colors.text },
+  chapterChipCount: { fontSize: 12, color: colors.muted },
   listGroup: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   listGroupHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8 },
   listGroupTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
