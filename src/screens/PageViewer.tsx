@@ -7,6 +7,7 @@ import {
   Alert,
   FlatList,
   Modal,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -55,7 +56,6 @@ import { deckBookId, refreshContent, uploadContent } from "../sync/deck";
 import { cardKey, cardKeyMaps } from "../sync/cardKeys";
 import { colors } from "../ui/theme";
 
-type FitMode = "width" | "page";
 
 /** Do two page-coordinate rects overlap? (used by 範囲一括削除). */
 function rectsOverlap(a: Rect, b: Rect): boolean {
@@ -70,6 +70,71 @@ function Tool({ label, on, onPress }: { label: string; on?: boolean; onPress: ()
   );
 }
 
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+/** Pure-JS page slider (no native dependency): drag to scrub, bubble previews the target page,
+ * the jump fires on release. */
+function PageSlider({
+  page,
+  pageCount,
+  onSeek,
+}: {
+  page: number;
+  pageCount: number;
+  onSeek: (p: number) => void;
+}) {
+  const [trackW, setTrackW] = useState(0);
+  const [drag, setDrag] = useState<number | null>(null); // 0..1 while scrubbing
+  const live = useRef({ trackW: 0, pct: 0, max: 1, onSeek });
+  live.current.trackW = trackW;
+  live.current.max = Math.max(1, pageCount - 1);
+  live.current.onSeek = onSeek;
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        const p = clamp01(e.nativeEvent.locationX / Math.max(1, live.current.trackW));
+        live.current.pct = p;
+        setDrag(p);
+      },
+      onPanResponderMove: (e) => {
+        const p = clamp01(e.nativeEvent.locationX / Math.max(1, live.current.trackW));
+        live.current.pct = p;
+        setDrag(p);
+      },
+      onPanResponderRelease: () => {
+        setDrag(null);
+        live.current.onSeek(Math.round(live.current.pct * live.current.max));
+      },
+      onPanResponderTerminate: () => setDrag(null),
+    }),
+  ).current;
+
+  const pct = drag ?? page / live.current.max;
+  const thumbX = Math.max(0, pct * trackW - 9);
+  const bubbleX = Math.max(0, Math.min(trackW - 56, pct * trackW - 28));
+  return (
+    <View
+      style={styles.sliderWrap}
+      onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}
+      {...pan.panHandlers}
+    >
+      <View style={styles.sliderTrack} />
+      <View style={[styles.sliderFill, { width: Math.max(0, pct * trackW) }]} />
+      <View style={[styles.sliderThumb, { left: thumbX }, drag !== null && styles.sliderThumbOn]} />
+      {drag !== null ? (
+        <View style={[styles.sliderBubble, { left: bubbleX }]}>
+          <Text style={styles.sliderBubbleTxt}>
+            P.{Math.round(pct * live.current.max) + 1}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 export function PageViewer({ deckId }: { deckId: number }) {
   const setView = useApp((s) => s.setView);
   const ref = useRef<ViewerHandle>(null);
@@ -79,7 +144,6 @@ export function PageViewer({ deckId }: { deckId: number }) {
   const [page, setPage] = useState(0);
   const [pageCount, setPageCount] = useState(0);
   const [mode, setMode] = useState<ReadMode>("scroll");
-  const [fit, setFit] = useState<FitMode>("width");
   const [zoom, setZoom] = useState(1);
   const [redMode, setRedMode] = useState<"mask" | "sheet" | "off">("mask");
   const [err, setErr] = useState<string | null>(null);
@@ -373,10 +437,8 @@ export function PageViewer({ deckId }: { deckId: number }) {
     void updateDeck(deckId, { lastMode: m });
     pushProgress();
   };
-  const setFitMode = (f: FitMode) => {
-    setFit(f);
-    ref.current?.setFit(f);
-  };
+  // Fit is fixed to "width" (matching the web viewer — Kindle-style: magnification is the ±/%
+  // controls and pinch; there is no 全体表示 toggle).
   // Zoom is owned by the engine (so pinch and buttons stay in sync): ask it to change,
   // then the zoom-changed event updates our displayed %.
   const zoomBy = (d: number) =>
@@ -643,6 +705,14 @@ export function PageViewer({ deckId }: { deckId: number }) {
         <Text style={styles.title} numberOfLines={1}>
           {name}
         </Text>
+        <Pressable onPress={toggleStarReview} hitSlop={10}>
+          <Text style={[styles.starBtn, starMode && styles.starBtnOn]}>
+            {starMode ? "★" : "☆"}
+          </Text>
+        </Pressable>
+        <Pressable onPress={openBookmarks} hitSlop={10}>
+          <Text style={styles.topBtn}>目次</Text>
+        </Pressable>
         <Pressable
           onPress={() => setView({ name: "quiz", deckId, from: { name: "viewer", deckId } })}
           hitSlop={10}
@@ -694,29 +764,20 @@ export function PageViewer({ deckId }: { deckId: number }) {
           <Pressable onPress={goPrev} style={styles.navBtn} hitSlop={8}>
             <Text style={styles.navTxt}>‹</Text>
           </Pressable>
-          <Text style={styles.pageTxt}>
-            {page + 1} / {pageCount}　{percent}%
-          </Text>
+          <PageSlider
+            page={page}
+            pageCount={pageCount}
+            onSeek={(p) => ref.current?.goToPage(p)}
+          />
           <Pressable onPress={goNext} style={styles.navBtn} hitSlop={8}>
             <Text style={styles.navTxt}>›</Text>
           </Pressable>
         </View>
 
-        <View style={styles.zoomRow}>
-          <View style={styles.seg}>
-            <Pressable
-              style={[styles.segBtn, fit === "width" && styles.segOn]}
-              onPress={() => setFitMode("width")}
-            >
-              <Text style={[styles.segTxt, fit === "width" && styles.segTxtOn]}>幅</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.segBtn, fit === "page" && styles.segOn]}
-              onPress={() => setFitMode("page")}
-            >
-              <Text style={[styles.segTxt, fit === "page" && styles.segTxtOn]}>全体</Text>
-            </Pressable>
-          </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.pageTxt}>
+            {page + 1} / {pageCount}・{percent}%
+          </Text>
           <View style={styles.zoomCtrls}>
             <Pressable style={styles.zBtn} onPress={() => zoomBy(-0.2)} hitSlop={6}>
               <Text style={styles.zTxt}>−</Text>
@@ -757,8 +818,6 @@ export function PageViewer({ deckId }: { deckId: number }) {
               <Tool label="赤シート" on={redMode === "sheet"} onPress={selectSheet} />
             )}
             <Tool label={mode === "scroll" ? "縦読み" : "横読み"} onPress={toggleMode} />
-            <Tool label="★復習" on={starMode} onPress={toggleStarReview} />
-            <Tool label="目次" onPress={openBookmarks} />
             <Tool label="編集" onPress={enterEdit} />
           </View>
         )}
@@ -815,6 +874,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 14,
     paddingHorizontal: 14,
     paddingVertical: 10,
     backgroundColor: colors.surface,
@@ -822,31 +882,57 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   topBtn: { color: colors.ocean, fontSize: 16 },
-  gearBtn: { color: colors.ocean, fontSize: 18, marginLeft: 20 }, // separated from 問題 so they don't crowd
-  title: { flex: 1, textAlign: "center", fontSize: 15, fontWeight: "700", color: colors.text },
+  gearBtn: { color: colors.ocean, fontSize: 18 },
+  starBtn: { color: colors.muted, fontSize: 19, marginTop: -1 },
+  starBtnOn: { color: colors.sand },
+  title: { flex: 1, textAlign: "left", fontSize: 15, fontWeight: "700", color: colors.text },
   viewerWrap: { flex: 1 },
-  bottom: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: 6 },
-  navRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 18, paddingVertical: 5 },
-  navBtn: { paddingHorizontal: 16 },
-  navTxt: { fontSize: 26, color: colors.sand, fontWeight: "700" },
-  pageTxt: { fontSize: 14, color: colors.text, minWidth: 120, textAlign: "center" },
-  zoomRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 4 },
-  seg: { flexDirection: "row", borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: "hidden" },
-  segBtn: { paddingHorizontal: 16, paddingVertical: 7, backgroundColor: colors.surface },
-  segOn: { backgroundColor: colors.sand },
-  segTxt: { fontSize: 14, color: colors.text },
-  segTxtOn: { color: "#fff", fontWeight: "700" },
-  zoomCtrls: { flexDirection: "row", alignItems: "center", gap: 6 },
-  zBtn: { width: 38, height: 36, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
-  zTxt: { fontSize: 20, color: colors.sand, fontWeight: "700" },
-  zPctBtn: { minWidth: 60, paddingVertical: 7, borderRadius: 8, alignItems: "center" },
+  bottom: { backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 2, paddingBottom: 6 },
+  navRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 4, paddingVertical: 2 },
+  navBtn: { paddingHorizontal: 12, paddingVertical: 2 },
+  navTxt: { fontSize: 24, color: colors.sand, fontWeight: "700" },
+  pageTxt: { fontSize: 12.5, color: colors.textSub, fontVariant: ["tabular-nums"] },
+  sliderWrap: { flex: 1, height: 32, justifyContent: "center" },
+  sliderTrack: { position: "absolute", left: 0, right: 0, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  sliderFill: { position: "absolute", left: 0, height: 4, borderRadius: 2, backgroundColor: colors.sand },
+  sliderThumb: {
+    position: "absolute",
+    top: 7,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.sand,
+    borderWidth: 2,
+    borderColor: "#fff",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  sliderThumbOn: { transform: [{ scale: 1.25 }] },
+  sliderBubble: {
+    position: "absolute",
+    top: -26,
+    width: 56,
+    alignItems: "center",
+    backgroundColor: colors.text,
+    borderRadius: 7,
+    paddingVertical: 3,
+  },
+  sliderBubbleTxt: { color: "#fff", fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  infoRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 12, paddingVertical: 3, gap: 8 },
+  zoomCtrls: { flexDirection: "row", alignItems: "center", gap: 5 },
+  zBtn: { width: 32, height: 30, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  zTxt: { fontSize: 18, color: colors.sand, fontWeight: "700" },
+  zPctBtn: { minWidth: 50, paddingVertical: 5, borderRadius: 8, alignItems: "center" },
   zPctOn: { backgroundColor: colors.sand },
-  zPct: { fontSize: 14, color: colors.text },
+  zPct: { fontSize: 13, color: colors.text, fontVariant: ["tabular-nums"] },
   zPctTxtOn: { color: "#fff", fontWeight: "700" },
-  toolRow: { flexDirection: "row", justifyContent: "space-around", paddingVertical: 4 },
-  tool: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
-  toolOn: { backgroundColor: colors.sand },
-  toolTxt: { fontSize: 14, color: colors.text },
+  toolRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 6, paddingHorizontal: 8, paddingVertical: 5 },
+  tool: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bg },
+  toolOn: { backgroundColor: colors.sand, borderColor: colors.sand },
+  toolTxt: { fontSize: 12.5, color: colors.text, fontWeight: "600" },
   toolTxtOn: { color: "#fff", fontWeight: "700" },
   modal: { flex: 1, backgroundColor: colors.bg, paddingTop: 54, paddingHorizontal: 20 },
   modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },

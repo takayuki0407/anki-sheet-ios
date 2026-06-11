@@ -10,7 +10,7 @@
     <style>
       html {
         height: 100%;
-        background: #525659; /* overscroll/bounce area shows through when the (dark) viewer is open */
+        background: #e9e2d3; /* overscroll/bounce area shows through when the viewer is open (warm beige to match the app theme) */
       }
       body {
         margin: 0;
@@ -32,7 +32,7 @@
       #viewer {
         display: none; /* shown (block / flex) when a book is opened */
         min-height: 100vh;
-        background: #525659;
+        background: #e9e2d3;
         /* The native WKWebView scroll view scrolls the whole document (RN: scrollEnabled +
            directionalLockEnabled), so iOS supplies Safari-grade momentum AND axis-direction lock —
            a near-vertical swipe is locked to vertical by UIScrollView, no JS needed. pan-x pan-y
@@ -60,7 +60,7 @@
         position: relative;
         margin: 0 0 8px;
         background: #fff;
-        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 1px 5px rgba(80, 65, 40, 0.22);
       }
       #viewer.paged .vpage {
         margin: 0;
