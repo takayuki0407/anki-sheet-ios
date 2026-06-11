@@ -19,6 +19,7 @@ import { DevTierSwitch } from "../components/DevTierSwitch";
 import { deckCountTotal } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
 import { restore } from "../iap/purchases";
+import { getGenUsage, type GenUsage } from "../ai/generate";
 import { deleteAccount, signOut, useAccount } from "../auth/account";
 import { applyDeviceNameToLocalBooks } from "../sync/deck";
 import { getDeviceName, loadDeviceName, setDeviceName } from "../sync/device";
@@ -87,16 +88,29 @@ export function Info() {
   const setView = useApp((s) => s.setView);
   const tier = useEntitlements((s) => s.tier);
   const billingActive = useEntitlements((s) => s.billingActive);
-  const eff = effectiveTier({ tier, billingActive });
   const user = useAccount((s) => s.user);
   const [deckCount, setDeckCount] = useState<number | null>(null);
+  const [usage, setUsage] = useState<GenUsage | null>(null);
   const [showLicenses, setShowLicenses] = useState(false);
   const [deviceName, setDeviceNameInput] = useState("");
   const [devSaving, setDevSaving] = useState(false);
 
+  // The SERVER tier is authoritative for the plan display (it knows admin and dev-switched tiers);
+  // the local RC entitlement is only the offline/signed-out fallback. Showing the local entitlement
+  // here made the admin account read as "Free" (it has no store subscription).
+  const eff = (usage?.tier ?? effectiveTier({ tier, billingActive })) as
+    | "free"
+    | "standard"
+    | "pro"
+    | "premium"
+    | "admin";
+
   useEffect(() => {
     deckCountTotal().then(setDeckCount);
     void loadDeviceName().then(() => setDeviceNameInput(getDeviceName()));
+    getGenUsage()
+      .then(setUsage)
+      .catch(() => {}); // offline / signed out → fall back to the local entitlement
   }, []);
 
   const onSaveDeviceName = useCallback(async () => {
@@ -256,28 +270,34 @@ export function Info() {
           <Row
             label="現在のプラン"
             value={
-              eff === "premium"
-                ? "Premium（無制限）"
-                : eff === "pro"
-                  ? "Pro（無制限）"
-                  : eff === "standard"
-                    ? `Standard（本 ${deckCount ?? "…"} / ${STANDARD_DECK_LIMIT} 冊）`
-                    : `Free（本 ${deckCount ?? "…"} / ${FREE_DECK_LIMIT} 冊）`
+              eff === "admin"
+                ? "管理者（無制限）"
+                : eff === "premium"
+                  ? "Premium（無制限）"
+                  : eff === "pro"
+                    ? "Pro（無制限）"
+                    : eff === "standard"
+                      ? `Standard（本 ${deckCount ?? "…"} / ${STANDARD_DECK_LIMIT} 冊）`
+                      : `Free（本 ${deckCount ?? "…"} / ${FREE_DECK_LIMIT} 冊）`
             }
           />
           <Row
             label="AI問題の生成"
             value={
-              eff === "premium"
-                ? "月100回"
-                : eff === "pro"
-                  ? "月30回"
-                  : eff === "standard"
-                    ? "月10回"
-                    : "月1回"
+              usage
+                ? usage.unlimited
+                  ? `今月 ${usage.count} 回（無制限）`
+                  : `残り ${usage.remaining} / 月${usage.limit}回`
+                : eff === "premium"
+                  ? "月100回"
+                  : eff === "pro"
+                    ? "月30回"
+                    : eff === "standard"
+                      ? "月10回"
+                      : "月1回"
             }
           />
-          {eff !== "premium" ? (
+          {eff !== "premium" && eff !== "admin" ? (
             <Row label="プランをアップグレード" onPress={() => setView({ name: "paywall" })} />
           ) : null}
           <Row
