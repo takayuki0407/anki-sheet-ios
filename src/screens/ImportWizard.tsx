@@ -227,7 +227,7 @@ export function ImportWizard() {
             赤シート対応PDF（色付きの答えを赤シートで隠すタイプ）を選び、次の画面で答えの色（自動／赤・マゼンタなど）を選んで検出します。
           </Text>
           <Text style={styles.muted}>
-            ※スキャン画像のPDF（文字を選択できない・テキスト情報のないもの）には対応していません。
+            ※スキャン画像のPDF（文字を選択できない・テキスト情報のないもの）は現在非対応です。今後のアップデートで対応予定です。
           </Text>
           <Pressable style={styles.primary} onPress={pick} disabled={!engine.ready}>
             <Text style={styles.primaryText}>{engine.ready ? "PDFを選ぶ" : "エンジン準備中…"}</Text>
