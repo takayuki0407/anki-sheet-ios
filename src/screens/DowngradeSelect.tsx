@@ -82,7 +82,14 @@ export function DowngradeSelect({
           onPress: async () => {
             try {
               setBusy(true);
-              await submitTrim([...keep]);
+              const trim = await submitTrim([...keep]);
+              if (trim.skipped) {
+                // The server skipped the trim (no longer required — e.g. re-upgraded meanwhile):
+                // nothing was demoted, so do NOT delete anything locally either.
+                await onResolved();
+                setView({ name: "decks" });
+                return;
+              }
               // Reconcile THIS device: delete local copies of books that weren't kept.
               const ids = await localBookIds(); // Map<bookId, deckId>
               for (const [bid, deckId] of ids) {

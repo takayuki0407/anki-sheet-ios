@@ -18,9 +18,9 @@ export function syncErrorMessage(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e);
   if (m === "not_signed_in") return "サインインが必要です。ログインしてからお試しください。";
   if (/\b404\b/.test(m))
-    return "このPDFはクラウドに保存されていません。クラウドからの取得は、Proプランで取り込んだ本のみ可能です（Standardプランはクラウド保存なし）。";
+    return "このPDFはクラウドに保存されていません（クラウド保存はProプランで取り込んだ本に作られます）。";
   if (/\b403\b/.test(m))
-    return "この操作はProプラン限定です。Proにアップグレードするとクラウド保存・取得が使えます。";
+    return "この操作にはProプランが必要です（クラウドへの保存や、退避した本の復元など）。";
   if (/\b5\d\d\b/.test(m)) return "サーバーで一時的なエラーが発生しました。時間をおいて再試行してください。";
   if (/network|fetch|timeout/i.test(m))
     return "ネットワークに接続できません。通信環境を確認して再試行してください。";
@@ -75,10 +75,13 @@ export async function retainBook(bookId: string): Promise<void> {
   if (!res.ok && res.status !== 404) throw new Error(`retain failed: ${res.status}`);
 }
 
-/** Resolve a downgrade trim: keep these book ids (server makes the kept set authoritative). */
-export async function submitTrim(keep: string[]): Promise<void> {
+/** Resolve a downgrade trim: keep these book ids (server makes the kept set authoritative).
+ * `skipped: true` = the server found the trim no longer required (e.g. the user re-upgraded while
+ * the trim screen was open) and demoted NOTHING — the caller must skip its local reconcile too. */
+export async function submitTrim(keep: string[]): Promise<{ skipped?: boolean }> {
   const res = await authedFetch("/trim", { method: "POST", body: JSON.stringify({ keep }) });
   if (!res.ok) throw new Error(`trim failed: ${res.status}`);
+  return (await res.json()) as { skipped?: boolean };
 }
 
 /** Free an account-global slot (idempotent; 404 is fine). */

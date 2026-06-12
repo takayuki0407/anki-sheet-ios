@@ -684,7 +684,7 @@ export function DeckList() {
                 <Text style={styles.cloudNote}>
                   {cloudPro
                     ? "同じアカウントの本です。「取り込む」で追加、「クラウドから完全に削除」ですべての端末から削除します。"
-                    : "同じアカウントの、この端末にない本です。各本の「枠を空ける」でアカウントの枠を解放できます。クラウド保存がある本はProに戻すと復元できますが、ない本は復元できません。"}
+                    : "同じアカウントの、この端末にない本です。クラウド保存（☁️）がある本は「取り込む」でこの端末に移せます。外すとアカウントの枠が空きますが、クラウド保存のない本は復元できません。"}
                 </Text>
                 {cloud.map((b) => (
                   <View key={b.book_id} style={styles.cloudRow}>
@@ -701,23 +701,24 @@ export function DeckList() {
                         </Text>
                       </View>
                     </View>
+                    {/* ACTIVEな本のダウンロードはサーバが全プランのオーナーに開放している（blob/
+                        content GET）。Standard/Freeでも「取り込む」でこの端末へ移せる — クラウドの
+                        みの本を「外す」しかできない状態にしない（ダウングレード時のデータ人質防止）。 */}
+                    {b.size > 0 ? (
+                      <Pressable
+                        style={styles.cloudBtn}
+                        disabled={downloading.has(b.book_id)}
+                        onPress={() => onDownload(b)}
+                      >
+                        <Text style={styles.cloudBtnText}>
+                          {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                     {cloudPro ? (
-                      <>
-                        {b.size > 0 ? (
-                          <Pressable
-                            style={styles.cloudBtn}
-                            disabled={downloading.has(b.book_id)}
-                            onPress={() => onDownload(b)}
-                          >
-                            <Text style={styles.cloudBtnText}>
-                              {downloading.has(b.book_id) ? "取り込み中…" : "取り込む"}
-                            </Text>
-                          </Pressable>
-                        ) : null}
-                        <Pressable style={styles.cloudDeleteBtn} onPress={() => onRemoveCloud(b)}>
-                          <Text style={styles.cloudDeleteText}>クラウドから完全に削除</Text>
-                        </Pressable>
-                      </>
+                      <Pressable style={styles.cloudDeleteBtn} onPress={() => onRemoveCloud(b)}>
+                        <Text style={styles.cloudDeleteText}>クラウドから完全に削除</Text>
+                      </Pressable>
                     ) : (
                       <Pressable style={styles.cloudDeleteBtn} onPress={() => onReleaseCloud(b)}>
                         <Text style={styles.cloudDeleteText}>
