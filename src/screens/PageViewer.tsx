@@ -85,9 +85,12 @@ function PageSlider({
 }) {
   const [trackW, setTrackW] = useState(0);
   const [drag, setDrag] = useState<number | null>(null); // 0..1 while scrubbing
-  const live = useRef({ trackW: 0, pct: 0, max: 1, onSeek });
+  // max is floored to 1 only for the percentage math — seeks are clamped to the REAL last page
+  // (a 1-page book must not be able to seek to page 2).
+  const live = useRef({ trackW: 0, pct: 0, max: 1, last: 0, onSeek });
   live.current.trackW = trackW;
   live.current.max = Math.max(1, pageCount - 1);
+  live.current.last = Math.max(0, pageCount - 1);
   live.current.onSeek = onSeek;
 
   const pan = useRef(
@@ -106,7 +109,9 @@ function PageSlider({
       },
       onPanResponderRelease: () => {
         setDrag(null);
-        live.current.onSeek(Math.round(live.current.pct * live.current.max));
+        live.current.onSeek(
+          Math.min(live.current.last, Math.round(live.current.pct * live.current.max)),
+        );
       },
       onPanResponderTerminate: () => setDrag(null),
     }),
@@ -127,7 +132,7 @@ function PageSlider({
       {drag !== null ? (
         <View style={[styles.sliderBubble, { left: bubbleX }]}>
           <Text style={styles.sliderBubbleTxt}>
-            P.{Math.round(pct * live.current.max) + 1}
+            P.{Math.min(live.current.last, Math.round(pct * live.current.max)) + 1}
           </Text>
         </View>
       ) : null}

@@ -7,6 +7,7 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithCredential,
   signInWithEmailAndPassword,
   signOut as fbSignOut,
@@ -99,6 +100,10 @@ export async function signInWithEmail(email: string, password: string): Promise<
 
 export async function signUpWithEmail(email: string, password: string): Promise<void> {
   await createUserWithEmailAndPassword(requireAuth(), email.trim(), password);
+}
+
+export async function resetPassword(email: string): Promise<void> {
+  await sendPasswordResetEmail(requireAuth(), email.trim());
 }
 
 /** Native Sign in with Apple (works on a dev build / TestFlight, not in Expo Go). */

@@ -17,11 +17,28 @@ import { useApp } from "../store/session";
 import {
   appleAvailable,
   isAuthConfigured,
+  resetPassword,
   signInWithApple,
   signInWithEmail,
   signUpWithEmail,
 } from "../auth/account";
 import { colors } from "../ui/theme";
+
+/** Firebase auth errors → human Japanese (mirrors the web Login). */
+function authError(err: unknown): string {
+  const code =
+    err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "";
+  if (/invalid-credential|wrong-password|user-not-found/.test(code))
+    return "メールアドレスまたはパスワードが正しくありません。";
+  if (code.includes("email-already-in-use")) return "このメールアドレスは既に登録されています。";
+  if (code.includes("weak-password")) return "パスワードは6文字以上にしてください。";
+  if (code.includes("invalid-email")) return "メールアドレスの形式が正しくありません。";
+  if (code.includes("too-many-requests"))
+    return "試行回数が多すぎます。しばらくしてからお試しください。";
+  if (code.includes("network-request-failed"))
+    return "通信できませんでした。電波状況をご確認ください。";
+  return err instanceof Error ? err.message : String(err);
+}
 
 export function Login() {
   const setView = useApp((s) => s.setView);
@@ -58,11 +75,30 @@ export function Login() {
       else await signUpWithEmail(email, password);
       done();
     } catch (e) {
-      Alert.alert("エラー", e instanceof Error ? e.message : String(e));
+      Alert.alert("エラー", authError(e));
     } finally {
       setBusy(false);
     }
   }, [mode, email, password, done]);
+
+  const onReset = useCallback(async () => {
+    if (!email.trim()) {
+      Alert.alert("パスワード再設定", "先にメールアドレスを入力してください。");
+      return;
+    }
+    try {
+      setBusy(true);
+      await resetPassword(email);
+      Alert.alert(
+        "送信しました",
+        "パスワード再設定メールを送信しました。メールのリンクから新しいパスワードを設定したあと、ログインしてください。",
+      );
+    } catch (e) {
+      Alert.alert("エラー", authError(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [email]);
 
   return (
     <View style={styles.c}>
@@ -76,7 +112,7 @@ export function Login() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>ログイン</Text>
+        <Text style={styles.title}>{mode === "in" ? "ログイン" : "アカウントを作成"}</Text>
         <Text style={styles.lead}>
           ログインすると、ご利用中のサブスクリプションをこの端末に反映できます。
         </Text>
@@ -125,6 +161,11 @@ export function Login() {
             {mode === "in" ? "アカウントを新規作成" : "既存のアカウントでログイン"}
           </Text>
         </Pressable>
+        {mode === "in" ? (
+          <Pressable onPress={() => void onReset()} disabled={busy} hitSlop={8}>
+            <Text style={styles.toggle}>パスワードを忘れた場合</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
     </View>
   );

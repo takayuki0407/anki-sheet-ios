@@ -91,6 +91,7 @@ export function Info() {
   const user = useAccount((s) => s.user);
   const [deckCount, setDeckCount] = useState<number | null>(null);
   const [usage, setUsage] = useState<GenUsage | null>(null);
+  const [usageDone, setUsageDone] = useState(false);
   const [showLicenses, setShowLicenses] = useState(false);
   const [deviceName, setDeviceNameInput] = useState("");
   const [devSaving, setDevSaving] = useState(false);
@@ -110,7 +111,8 @@ export function Info() {
     void loadDeviceName().then(() => setDeviceNameInput(getDeviceName()));
     getGenUsage()
       .then(setUsage)
-      .catch(() => {}); // offline / signed out → fall back to the local entitlement
+      .catch(() => {}) // offline / signed out → fall back to the local entitlement
+      .finally(() => setUsageDone(true));
   }, []);
 
   const onSaveDeviceName = useCallback(async () => {
@@ -253,8 +255,8 @@ export function Info() {
             a="答えをタップで表示／もう一度タップで再び隠す。隠し方は『赤マスク』（答えを個別に隠す）と『赤シート』（縦読みで半透明シートをスライド）から選べます。2本指のピンチで拡大・縮小、倍率の数字をタップで100%に戻す。『縦読み／横読み』で読み方、『目次』でしおり、★で覚えにくい答えだけ復習できます。"
           />
           <Help
-            q="AIで○×問題を作る（解いて確かめる）"
-            a="本の「問題」から、ページの本文と赤シートで隠す語句をもとにAIが正誤問題（○×）を自動生成します。覚えたつもりを“解いて確かめる”ための機能です。この機能だけは、選んだページの本文と語句を当アプリのサーバー経由で外部のAIサービスに送信します（初回に同意確認）。送信した内容は既定でAIモデルの学習には使われません。生成される問題は誤りを含む場合があるため、内容はご自身で確認してください。色の検出・赤シートなど他の機能は端末内だけで完結します。生成した問題はご自身のアカウント内に保存され、ほかのユーザーへ共有されません。プラン別に月間の生成ページ数の上限があります。"
+            q="AIで問題を作る（○×・4択）"
+            a="本の「問題」から、ページの本文と赤シートで隠す語句をもとにAIが○×問題・4択問題を自動生成します。覚えたつもりを“解いて確かめる”ための機能で、間違えた問題だけの復習や章ごとの演習もできます。この機能だけは、選んだページの本文と語句を当アプリのサーバー経由で外部のAIサービスに送信します（初回に同意確認）。送信した内容は既定でAIモデルの学習には使われません。生成される問題は誤りを含む場合があるため、内容はご自身で確認してください。色の検出・赤シートなど他の機能は端末内だけで完結します。生成した問題はご自身のアカウント内に保存され、ほかのユーザーへ共有されません。プラン別に月間の生成回数の上限があります（1回＝1ページ×問題の種類。残り枠は下の「プラン」欄で確認）。"
           />
           <Help
             q="プランについて"
@@ -270,15 +272,17 @@ export function Info() {
           <Row
             label="現在のプラン"
             value={
-              eff === "admin"
-                ? "管理者（無制限）"
-                : eff === "premium"
-                  ? "Premium（無制限）"
-                  : eff === "pro"
-                    ? "Pro（無制限）"
-                    : eff === "standard"
-                      ? `Standard（本 ${deckCount ?? "…"} / ${STANDARD_DECK_LIMIT} 冊）`
-                      : `Free（本 ${deckCount ?? "…"} / ${FREE_DECK_LIMIT} 冊）`
+              user && !usageDone
+                ? "確認中…"
+                : eff === "admin"
+                  ? "管理者（無制限）"
+                  : eff === "premium"
+                    ? "Premium（無制限）"
+                    : eff === "pro"
+                      ? "Pro（無制限）"
+                      : eff === "standard"
+                        ? `Standard（本 ${deckCount ?? "…"} / ${STANDARD_DECK_LIMIT} 冊）`
+                        : `Free（本 ${deckCount ?? "…"} / ${FREE_DECK_LIMIT} 冊）`
             }
           />
           <Row
@@ -297,7 +301,7 @@ export function Info() {
                       : "月1回"
             }
           />
-          {eff !== "premium" && eff !== "admin" ? (
+          {(usageDone || !user) && eff !== "premium" && eff !== "admin" ? (
             <Row label="プランをアップグレード" onPress={() => setView({ name: "paywall" })} />
           ) : null}
           <Row
