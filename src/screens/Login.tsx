@@ -40,7 +40,7 @@ function authError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function Login() {
+export function Login({ forced }: { forced?: boolean } = {}) {
   const setView = useApp((s) => s.setView);
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
@@ -102,9 +102,11 @@ export function Login() {
 
   return (
     <View style={styles.c}>
-      <Pressable onPress={() => setView({ name: "decks" })} hitSlop={10}>
-        <Text style={styles.back}>← 閉じる</Text>
-      </Pressable>
+      {!forced ? (
+        <Pressable onPress={() => setView({ name: "decks" })} hitSlop={10}>
+          <Text style={styles.back}>← 閉じる</Text>
+        </Pressable>
+      ) : null}
       <ScrollView
         style={styles.flex}
         contentContainerStyle={styles.body}

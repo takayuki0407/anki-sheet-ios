@@ -9,6 +9,7 @@
 import { authedFetch } from "./api";
 import { answerReview, mergeReview } from "./srs";
 import { allReviews, getBookReviews, putReview } from "../db/repo";
+import { localBookIds } from "./deck";
 import type { QuestionRow, ReviewRow } from "../db/rows";
 
 interface ServerReview {
@@ -125,8 +126,12 @@ export async function syncReviews(bookIdOf: Map<string, string>): Promise<void> 
     if (mergeReview(cur, incoming) === incoming) await putReview(incoming);
   }
 
-  // Local → cloud (rows the cloud is missing or has older).
+  // Local → cloud (rows the cloud is missing or has older). Only push reviews whose book actually
+  // exists locally on this account: a restored backup can bring in questions/reviews whose book:
+  // mapping was dropped, and pushing those orphans would leak the previous account's history here.
+  const validBookIds = new Set((await localBookIds()).keys());
   const toPush = local.filter((r) => {
+    if (!validBookIds.has(r.bookId)) return false;
     const c = cloudByIdRaw.get(r.questionId);
     return !c || r.updatedAt > c.updated_at;
   });

@@ -130,9 +130,21 @@ export async function importDeck(p: ImportParams): Promise<number> {
         ]);
       }
     });
-    // Move the staged PDF into place AFTER commit, so a rolled-back import never consumes
-    // it (leaving import.pdf intact for a retry).
-    await savePdfForDeck(deckId, p.stagedPdfUri);
+    // Move the staged PDF into place AFTER commit, so a rolled-back import never consumes it
+    // (leaving import.pdf intact for a retry). If the move fails, undo the just-committed deck so we
+    // never leave a book that shows in the shelf but can't open (no PDF). We still hold the lock.
+    try {
+      await savePdfForDeck(deckId, p.stagedPdfUri);
+    } catch (e) {
+      await db.withTransactionAsync(async () => {
+        await db.runAsync("DELETE FROM cards WHERE deckId = ?", [deckId]);
+        await db.runAsync("DELETE FROM bookmarks WHERE deckId = ?", [deckId]);
+        await db.runAsync("DELETE FROM pdfs WHERE deckId = ?", [deckId]);
+        await db.runAsync("DELETE FROM covers WHERE deckId = ?", [deckId]);
+        await db.runAsync("DELETE FROM decks WHERE id = ?", [deckId]);
+      });
+      throw e;
+    }
     return deckId;
   });
 }
@@ -409,6 +421,13 @@ export async function deleteDeck(deckId: number): Promise<void> {
       await db.runAsync("DELETE FROM pdfs WHERE deckId = ?", [deckId]);
       await db.runAsync("DELETE FROM covers WHERE deckId = ?", [deckId]);
       await db.runAsync("DELETE FROM decks WHERE id = ?", [deckId]);
+      // Also drop this deck's per-deck meta rows so they don't orphan (and can't mis-seed a future
+      // deck that reuses the id).
+      const mk = [
+        "book:", "reg:", "contentAt:", "progressAt:", "clozeTomb:", "starsLww:",
+        "star:", "reveal:", "bmLww:", "fav:", "opened:", "autoToc:",
+      ].map((pfx) => pfx + deckId);
+      await db.runAsync(`DELETE FROM meta WHERE key IN (${mk.map(() => "?").join(",")})`, mk);
     });
     deleteDeckPdf(deckId);
   });

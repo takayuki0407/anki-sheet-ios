@@ -20,6 +20,7 @@ const RC_KEYS = {
 };
 
 let ready = false;
+let configured = false; // configure()+listener done once, independent of the first-fetch `ready` latch
 
 function tierOf(info: CustomerInfo): Tier {
   const active = info.entitlements.active;
@@ -55,15 +56,19 @@ export async function initPurchases(): Promise<boolean> {
     markUngated();
     return false; // not configured yet
   }
-  // configure() needs no network; if it throws, the native module is absent (Expo Go with a
-  // real key) — ungate rather than lock the dev build out.
-  try {
-    if (__DEV__) Purchases.setLogLevel(LOG_LEVEL.WARN);
-    Purchases.configure({ apiKey });
-    Purchases.addCustomerInfoUpdateListener(syncCustomerInfo);
-  } catch {
-    markUngated();
-    return false;
+  // configure() needs no network; if it throws, the native module is absent (Expo Go with a real
+  // key) — ungate rather than lock the dev build out. Guard with `configured` so a failed first fetch
+  // (which leaves `ready` false) or a concurrent caller can't re-configure / double-add the listener.
+  if (!configured) {
+    try {
+      if (__DEV__) Purchases.setLogLevel(LOG_LEVEL.WARN);
+      Purchases.configure({ apiKey });
+      Purchases.addCustomerInfoUpdateListener(syncCustomerInfo);
+      configured = true;
+    } catch {
+      markUngated();
+      return false;
+    }
   }
   // SDK is configured. A failed first fetch must NOT grant access (closes the "kill the network
   // to get free Pro" hole) — lock until the listener delivers the real entitlements.

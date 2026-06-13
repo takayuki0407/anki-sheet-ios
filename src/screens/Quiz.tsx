@@ -74,6 +74,23 @@ const FILTERS: { key: PageFilter; label: string }[] = [
 
 const CONTEXT_CHARS = 700;
 
+/** One-time AI consent gate (shared by bulk generate + regenerate — both send page text to the AI). */
+function ensureAiConsent(): Promise<boolean> {
+  return new Promise((resolve) => {
+    void hasAiConsent().then((ok) => {
+      if (ok) return resolve(true);
+      Alert.alert(
+        "AI問題生成について",
+        "この機能では、選んだページの本文と暗記語句を、当アプリのサーバー経由で外部のAIに送信して問題を作成します。生成された問題は誤りを含む場合があります。赤シート・色の検出など他の機能は、これまでどおり端末内だけで完結します。\n\n同意して続けますか？",
+        [
+          { text: "キャンセル", style: "cancel", onPress: () => resolve(false) },
+          { text: "同意して続ける", onPress: () => void setAiConsent().then(() => resolve(true)) },
+        ],
+      );
+    });
+  });
+}
+
 // ---- page-thumbnail cache + concurrency limiter (module scope) --------------------------------
 // pdf.js serializes render() on ONE canvas, so firing cover() for 200+ pages at mount stalls the
 // whole list. We (a) cache resolved data URIs per book+page, (b) fetch a row only once it scrolls
@@ -653,6 +670,7 @@ function ListTab({
           text: "作り直す",
           onPress: () => {
             void (async () => {
+              if (!(await ensureAiConsent())) return;
               const key = `${page}:${qtype}`;
               setBusyKey(key);
               setMsg(null);
@@ -887,24 +905,9 @@ function GenerateTab({
     });
   };
 
-  const ensureConsent = (): Promise<boolean> =>
-    new Promise((resolve) => {
-      void hasAiConsent().then((ok) => {
-        if (ok) return resolve(true);
-        Alert.alert(
-          "AI問題生成について",
-          "この機能では、選んだページの本文と暗記語句を、当アプリのサーバー経由で外部のAIに送信して問題を作成します。生成された問題は誤りを含む場合があります。赤シート・色の検出など他の機能は、これまでどおり端末内だけで完結します。\n\n同意して続けますか？",
-          [
-            { text: "キャンセル", style: "cancel", onPress: () => resolve(false) },
-            { text: "同意して続ける", onPress: () => void setAiConsent().then(() => resolve(true)) },
-          ],
-        );
-      });
-    });
-
   const runBatch = async (targets: number[]) => {
     if (!bookId || !pdfUrl || !targets.length || run) return;
-    if (!(await ensureConsent())) return;
+    if (!(await ensureAiConsent())) return;
     setMsg(null);
     cancelRef.current = false;
     createdRef.current = [];

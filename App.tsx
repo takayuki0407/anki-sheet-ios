@@ -65,6 +65,10 @@ function Gate() {
   const [trimRequired, setTrimRequired] = useState(false);
   const [cap, setCap] = useState(1);
   const [tick, setTick] = useState(0);
+  // A just-completed upgrade flips the entitlement tier immediately; clear the forced trim
+  // optimistically so a purchase doesn't bounce the user back to it while the server (webhook) lags.
+  const tier = useEntitlements((s) => s.tier);
+  const trimActive = trimRequired && tier !== "pro" && tier !== "premium";
   useEffect(() => {
     if (!user) {
       setTrimRequired(false);
@@ -91,7 +95,7 @@ function Gate() {
     const onBack = (): boolean => {
       if (isAuthConfigured && !user) return false; // sign-in wall → let Android exit
       const v = useApp.getState().view;
-      if (trimRequired) {
+      if (trimActive) {
         // Info/paywall/login float over the forced trim → back returns to the trim screen.
         if (v.name === "info" || v.name === "paywall" || v.name === "login") {
           setView({ name: "decks" });
@@ -109,13 +113,13 @@ function Gate() {
     };
     const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
     return () => sub.remove();
-  }, [user, trimRequired, setView]);
+  }, [user, trimActive, setView]);
 
   if (!ready || !userReady) return null; // brief splash
   // Sign-in is REQUIRED (when auth is configured): the app is for signed-in accounts only.
-  if (isAuthConfigured && !user) return <Login />;
+  if (isAuthConfigured && !user) return <Login forced />;
   // Forced trim after a downgrade. Keep Info/login/paywall reachable (Apple 5.1.1(v) + upgrade escape).
-  if (trimRequired) {
+  if (trimActive) {
     if (view.name === "login") return <Login />;
     if (view.name === "info") return <Info />;
     if (view.name === "paywall") return <Paywall />;

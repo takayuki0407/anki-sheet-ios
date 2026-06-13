@@ -48,6 +48,13 @@ let started = false;
 export function initAuthListener(): void {
   if (started) return;
   started = true;
+  // Retry a cloud purge that a prior account deletion couldn't finish (token valid ~1h after delete).
+  void getMeta("pendingAccountPurge").then((tok) => {
+    if (tok)
+      void deleteAccountData(tok)
+        .then(() => setMeta("pendingAccountPurge", ""))
+        .catch(() => {});
+  });
   const auth = getFirebaseAuth();
   if (!auth) {
     useAccount.getState().set({ ready: true });
@@ -155,7 +162,18 @@ export async function deleteAccount(): Promise<void> {
   const auth = getFirebaseAuth();
   const u = auth?.currentUser;
   if (!u) throw new Error("ログインしていません。"); // never silently report "deleted"
-  const token = await u.getIdToken(); // capture BEFORE deleteUser — valid for the purge afterwards
-  await deleteUser(u); // throws auth/requires-recent-login here, before any data is touched
-  await deleteAccountData(token); // erase R2 + D1 data for this account
+  const token = await u.getIdToken(); // capture BEFORE deleteUser — valid (~1h) for the purge afterwards
+  await deleteUser(u); // throws auth/requires-recent-login here, before any data is touched (clean abort)
+  // The auth user is gone but the captured ID token stays valid ~1h. Purge cloud data, retrying a
+  // transient failure once; if it still fails, stash the token so the next launch retries — otherwise
+  // the R2/D1 data would orphan with no way to re-authenticate (App Store account-deletion rule).
+  try {
+    await deleteAccountData(token);
+  } catch {
+    try {
+      await deleteAccountData(token);
+    } catch {
+      await setMeta("pendingAccountPurge", token).catch(() => {});
+    }
+  }
 }
