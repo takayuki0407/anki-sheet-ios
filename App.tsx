@@ -2,7 +2,7 @@
 // the zustand view store. A subscription Gate wraps the router: with no active subscription the
 // app is locked to the paywall, and a Standard subscriber over the book limit must trim down.
 import { useEffect, useState } from "react";
-import { SafeAreaView, StyleSheet } from "react-native";
+import { BackHandler, SafeAreaView, StyleSheet } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { EngineProvider } from "./src/engine/EngineProvider";
 import { initPurchases } from "./src/iap/purchases";
@@ -57,6 +57,7 @@ function Router() {
 // trim, driven by the SERVER (trim_required when a downgrade left the account over its cap).
 function Gate() {
   const view = useApp((s) => s.view);
+  const setView = useApp((s) => s.setView);
   const decksVersion = useApp((s) => s.decksVersion);
   const ready = useEntitlements((s) => s.ready);
   const user = useAccount((s) => s.user);
@@ -81,6 +82,34 @@ function Gate() {
       live = false;
     };
   }, [user, view.name, decksVersion, tick]);
+
+  // Android hardware/gesture back: walk the single-stack view back instead of killing the app.
+  // Mirrors each screen's in-app back (settings/quiz return to their `from`). Forced screens
+  // (sign-in wall, downgrade trim) have nowhere to go, so we let the system exit. No-op on iOS
+  // (the event never fires there).
+  useEffect(() => {
+    const onBack = (): boolean => {
+      if (isAuthConfigured && !user) return false; // sign-in wall → let Android exit
+      const v = useApp.getState().view;
+      if (trimRequired) {
+        // Info/paywall/login float over the forced trim → back returns to the trim screen.
+        if (v.name === "info" || v.name === "paywall" || v.name === "login") {
+          setView({ name: "decks" });
+          return true;
+        }
+        return false; // on the trim itself → exit
+      }
+      if (v.name === "decks") return false; // bookshelf (home) → exit
+      if ((v.name === "settings" || v.name === "quiz") && v.from) {
+        setView(v.from); // back to where it was opened from (e.g. the viewer)
+        return true;
+      }
+      setView({ name: "decks" });
+      return true;
+    };
+    const sub = BackHandler.addEventListener("hardwareBackPress", onBack);
+    return () => sub.remove();
+  }, [user, trimRequired, setView]);
 
   if (!ready || !userReady) return null; // brief splash
   // Sign-in is REQUIRED (when auth is configured): the app is for signed-in accounts only.
