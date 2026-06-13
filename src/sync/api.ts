@@ -1,11 +1,13 @@
-// Client for the sync backend (https://anki-sheet.pages.dev/api/sync/*), mirroring the web app.
+// Client for the sync backend (https://kiokumate.tkdevlab.com/api/sync/*), mirroring the web app.
 // The Firebase ID token authenticates each call; the Worker maps it to the account uid. JSON
 // endpoints use fetch here; the PDF blob (binary) is uploaded/downloaded via expo-file-system in
 // sync/deck.ts (RN can't build a Blob from a file the way the web does).
+// ⚠ The custom domain must be ACTIVE in Cloudflare (and /api/sync reachable) BEFORE building with
+// this URL — otherwise every API call fails. The *.pages.dev origin also keeps working if needed.
 import { getFirebaseAuth } from "../auth/firebase";
 import type { ProgressBlob } from "./progressMerge";
 
-export const SYNC_BASE = "https://anki-sheet.pages.dev/api/sync";
+export const SYNC_BASE = "https://kiokumate.tkdevlab.com/api/sync";
 
 /** Current Firebase ID token, or null when signed out / auth not configured. */
 export async function idToken(): Promise<string | null> {

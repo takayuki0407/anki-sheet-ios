@@ -1,17 +1,15 @@
-// App-wide config. Fill these in before submitting to the App Store.
-//
-// Host privacy.md / terms.md (see /docs) somewhere public — GitHub Pages is free:
-//   Settings → Pages → deploy from the `docs/` folder → URLs become
-//   https://takayuki0407.github.io/anki-sheet-ios/privacy.html (etc.)
+// App-wide config. Public-facing URLs point at the custom domain kiokumate.tkdevlab.com
+// (Cloudflare Pages). ⚠ That domain must be ACTIVE in Cloudflare (custom-domain set up + cert
+// issued) before shipping a build that uses these URLs — until then the *.pages.dev URLs are the
+// only working ones, and a build pointing here would 404 / fail every API call.
 
 /** Support / contact email (opened from the help screen's お問い合わせ). */
 export const SUPPORT_EMAIL = "kiokumate@tkdevlab.com";
 
-/** Public URLs for the legal docs (required by App Store review).
- * Served from the Cloudflare deployment — drop docs/privacy.html & docs/terms.html there
- * (or add /privacy & /terms routes). Swap to a custom domain later if you get one. */
-export const PRIVACY_URL = "https://anki-sheet.pages.dev/privacy.html";
-export const TERMS_URL = "https://anki-sheet.pages.dev/terms.html";
+/** Public URLs for the legal docs (required by App Store review). Served from the Cloudflare
+ * Pages deployment via the custom domain (the *.pages.dev URL also stays valid as a fallback). */
+export const PRIVACY_URL = "https://kiokumate.tkdevlab.com/privacy.html";
+export const TERMS_URL = "https://kiokumate.tkdevlab.com/terms.html";
 
 /** App Store numeric id (from App Store Connect once the app exists) — for the rate prompt. */
 export const APP_STORE_ID = ""; // e.g. "1234567890"
