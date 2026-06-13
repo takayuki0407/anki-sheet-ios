@@ -21,6 +21,7 @@ import { initPurchases, syncCustomerInfo } from "../iap/purchases";
 import { deleteAccountData } from "../sync/api";
 import { getMeta, setMeta } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
+import { loadDeviceName } from "../sync/device";
 
 export interface AccountUser {
   uid: string;
@@ -62,7 +63,12 @@ export function initAuthListener(): void {
     if (u) {
       void (async () => {
         const prev = await getMeta("ownerUid");
-        if (prev && prev !== u.uid) await clearAllLocalData();
+        if (prev && prev !== u.uid) {
+          await clearAllLocalData();
+          // The wipe emptied the meta table — reload the in-memory device-name cache so the new
+          // account doesn't keep registering books under the previous user's custom device name.
+          await loadDeviceName();
+        }
         await setMeta("ownerUid", u.uid);
       })();
     }
@@ -136,13 +142,16 @@ export async function signOut(): Promise<void> {
   if (auth) await fbSignOut(auth);
 }
 
-/** Delete the account (App Store requires in-app deletion). Erases the account's cloud data
- * (PDF blobs + progress) first — while the token is still valid — then removes the auth user.
- * The cloud purge throwing aborts deletion so we never orphan data. May need a recent re-login. */
+/** Delete the account (App Store requires in-app deletion). Order matters: remove the auth user
+ * FIRST (this is what fails with requires-recent-login — and it touches no data, so a failure is a
+ * clean abort), THEN purge cloud data with the token captured beforehand. A Firebase ID token stays
+ * signature-valid for ~1h after the user is gone, so the server still accepts the purge call. This
+ * avoids the "cloud data deleted but account still exists" state of purging first. */
 export async function deleteAccount(): Promise<void> {
   const auth = getFirebaseAuth();
   const u = auth?.currentUser;
-  if (!u) return;
-  await deleteAccountData(); // erase R2 + D1 data for this account
-  await deleteUser(u);
+  if (!u) throw new Error("ログインしていません。"); // never silently report "deleted"
+  const token = await u.getIdToken(); // capture BEFORE deleteUser — valid for the purge afterwards
+  await deleteUser(u); // throws auth/requires-recent-login here, before any data is touched
+  await deleteAccountData(token); // erase R2 + D1 data for this account
 }

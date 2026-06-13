@@ -16,7 +16,7 @@ import {
 import * as Sharing from "expo-sharing";
 import { useApp } from "../store/session";
 import { deleteBookQuestions, deleteDeck } from "../db/repo";
-import { downloadDeck, localBookIds } from "../sync/deck";
+import { downloadDeck, isRegistered, localBookIds } from "../sync/deck";
 import { listBooks, submitTrim, updateBookMeta, type AccountBook } from "../sync/api";
 import { deviceLabel } from "../sync/device";
 import { exportBackup } from "../db/backup";
@@ -32,15 +32,23 @@ export function DowngradeSelect({
 }) {
   const setView = useApp((s) => s.setView);
   const [books, setBooks] = useState<AccountBook[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [keep, setKeep] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [backedUp, setBackedUp] = useState(false);
 
-  useEffect(() => {
+  // A fetch failure must NOT masquerade as「本が0冊」— an empty list would enable
+  //「選んだ 0 冊を残す」, which demotes the WHOLE library. Error → explicit retry.
+  const load = useCallback(() => {
+    setLoadError(false);
+    setBooks(null);
     void listBooks()
-      .then((u) => setBooks(u.books))
-      .catch(() => setBooks([]));
+      // Trim chooses among the ACTIVE (cap-relevant) books only — retained/trimmed books are
+      // already off-cap and must not be resurrectable from this screen.
+      .then((u) => setBooks(u.books.filter((b) => (b.status ?? "active") === "active")))
+      .catch(() => setLoadError(true));
   }, []);
+  useEffect(load, [load]);
 
   const toggle = useCallback(
     (id: string) =>
@@ -68,12 +76,12 @@ export function DowngradeSelect({
   }, []);
 
   const apply = useCallback(() => {
-    if (!books) return;
+    if (!books || books.length === 0) return;
     const removeCount = books.length - keep.size;
     const warn = backedUp ? "" : "⚠ バックアップはまだ書き出していません。\n";
     Alert.alert(
       "確認",
-      `${warn}選んだ ${keep.size} 冊をこの端末に保存します。外した ${removeCount} 冊のうち、クラウド保存がある本はクラウドに退避し、Proに戻すと復元できます（保持〜約6ヶ月）。クラウド保存の無い本（端末のみ）は完全に削除されます。Standardは端末間同期がないため、他の端末のローカルコピーは次回起動時に削除されます。`,
+      `${warn}選んだ ${keep.size} 冊をこの端末に保存します。外した ${removeCount} 冊のうち、クラウド保存がある本はクラウドに退避し、Proに戻すと復元できます（保持〜約6ヶ月）。クラウド保存の無い本（端末のみ）は完全に削除されます。このプランは端末間同期がないため、他の端末のローカルコピーは次回起動時に削除されます。`,
       [
         { text: "キャンセル", style: "cancel" },
         {
@@ -91,9 +99,13 @@ export function DowngradeSelect({
                 return;
               }
               // Reconcile THIS device: delete local copies of books that weren't kept.
+              // A never-registered local-only import (offline / fail-open) is NOT part of the
+              // account set the user trimmed — leave it alone (mirrors the bookshelf reconcile),
+              // otherwise the only copy of that book would be destroyed.
               const ids = await localBookIds(); // Map<bookId, deckId>
               for (const [bid, deckId] of ids) {
                 if (!keep.has(bid)) {
+                  if (!(await isRegistered(deckId))) continue;
                   await deleteDeck(deckId);
                   void deleteBookQuestions(bid).catch(() => {});
                 }
@@ -125,10 +137,44 @@ export function DowngradeSelect({
     );
   }, [books, keep, backedUp, onResolved, setView]);
 
+  if (loadError)
+    return (
+      <View style={styles.center}>
+        <Text style={styles.lead}>本の一覧を取得できませんでした。通信状況をご確認ください。</Text>
+        <Pressable style={styles.primary} onPress={load}>
+          <Text style={styles.primaryText}>再試行</Text>
+        </Pressable>
+      </View>
+    );
   if (!books)
     return (
       <View style={styles.center}>
         <ActivityIndicator color={colors.sand} />
+      </View>
+    );
+  if (books.length === 0)
+    // Server-confirmed: no ACTIVE books left → nothing to choose. Clear the trim flag and leave.
+    return (
+      <View style={styles.center}>
+        <Text style={styles.lead}>整理が必要な本はありません。</Text>
+        <Pressable
+          style={[styles.primary, busy && styles.disabled]}
+          disabled={busy}
+          onPress={async () => {
+            try {
+              setBusy(true);
+              await submitTrim([]);
+              await onResolved();
+              setView({ name: "decks" });
+            } catch (e) {
+              Alert.alert("エラー", e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <Text style={styles.primaryText}>本棚へ戻る</Text>
+        </Pressable>
       </View>
     );
 
@@ -194,7 +240,7 @@ export function DowngradeSelect({
 
 const styles = StyleSheet.create({
   c: { flex: 1, padding: 16 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 24 },
   title: { fontSize: 22, fontWeight: "800", color: colors.text, textAlign: "center", marginTop: 8 },
   lead: { fontSize: 13, color: colors.textSub, textAlign: "center", lineHeight: 20, marginTop: 8 },
   counter: { fontSize: 14, fontWeight: "700", color: colors.sand, textAlign: "center", marginVertical: 10 },

@@ -38,7 +38,7 @@ import {
   tombstonesOf,
   type ClozeMap,
 } from "./contentMerge";
-import { deviceLabel } from "./device";
+import { clearPreviousDeviceLabel, deviceLabel } from "./device";
 import type { DeckColorConfig, DetectedCloze } from "../types";
 
 // §2.2(a) Offline import enforcement: each sync caches the account's used/total slots; when offline
@@ -152,7 +152,7 @@ export async function backfillCloudIfPro(): Promise<void> {
   } catch {
     return;
   }
-  if (!(acct.tier === "pro" || acct.tier === "admin")) return; // only Pro can upload files
+  if (!acct.unlimited) return; // cloud upload is pro / premium / admin (server: isUnlimited)
   const size = new Map(acct.books.map((b) => [b.book_id, b.size]));
   const ids = await localBookIds(); // Map<bookId, deckId>
   for (const [bookId, deckId] of ids) {
@@ -163,7 +163,9 @@ export async function backfillCloudIfPro(): Promise<void> {
 
 /** Stamp THIS device's current name on every book it holds locally (in the account registry), so the
  * cloud list shows where a book is NOW — not just who first imported it. Called after the user
- * renames this device; only touches rows whose label differs. Best-effort; never throws. */
+ * renames this device; only touches rows whose label differs. Best-effort; never throws.
+ * Only once EVERY row is confirmed re-stamped is the pending previous label cleared — until then
+ * the reconcile keeps treating books stamped with the old name as held by this device. */
 export async function applyDeviceNameToLocalBooks(): Promise<void> {
   if (!(await idToken())) return;
   const me = deviceLabel();
@@ -171,13 +173,20 @@ export async function applyDeviceNameToLocalBooks(): Promise<void> {
   try {
     acct = await listBooks();
   } catch {
-    return;
+    return; // offline — the pending previous label stays, so nothing gets misclassified
   }
   const ids = await localBookIds(); // Map<bookId, deckId>
+  let allOk = true;
   for (const b of acct.books) {
-    if (ids.has(b.book_id) && b.device !== me)
-      await updateBookMeta(b.book_id, { device: me }).catch(() => {});
+    if (ids.has(b.book_id) && b.device !== me) {
+      try {
+        await updateBookMeta(b.book_id, { device: me });
+      } catch {
+        allOk = false;
+      }
+    }
   }
+  if (allOk) await clearPreviousDeviceLabel();
 }
 
 /** Build the content JSON (everything needed to rebuild the deck except the PDF) from local state. */

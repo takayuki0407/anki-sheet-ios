@@ -39,7 +39,7 @@ import {
   localBookIds,
   setRegistered,
 } from "../sync/deck";
-import { deviceLabel } from "../sync/device";
+import { deviceLabel, previousDeviceLabel } from "../sync/device";
 import type { DeckRow } from "../db/rows";
 import { colors } from "../ui/theme";
 
@@ -158,6 +158,12 @@ export function DeckList() {
         acct.books.filter((b) => (b.status ?? "active") === "active").map((b) => b.book_id),
       );
       const me = deviceLabel();
+      // A pending rename keeps the OLD label in the registry until applyDeviceNameToLocalBooks
+      // succeeds — books stamped with it are still OURS (deleting them here was the offline-rename
+      // self-wipe bug).
+      const prevMe = previousDeviceLabel();
+      const heldByMe = (holder: string | null | undefined) =>
+        !holder || holder === me || (prevMe != null && holder === prevMe);
       const singleHome = !acct.unlimited; // Standard/Free: a book lives on ONE device (the holder)
       // Cloud section = every ACTIVE account book NOT on this device, for BOTH tiers — including
       // zero-holder books (`device == null`, e.g. a Pro local-delete that left it cloud-only, or a
@@ -187,7 +193,7 @@ export function DeckList() {
       for (const [bid, deckId] of local) {
         const nonActive = known.has(bid) && !active.has(bid);
         const heldElsewhere =
-          singleHome && active.has(bid) && !!devByBook.get(bid) && devByBook.get(bid) !== me;
+          singleHome && active.has(bid) && !!devByBook.get(bid) && !heldByMe(devByBook.get(bid));
         const orphan = singleHome && canPrune && !known.has(bid) && (await isRegistered(deckId));
         if (nonActive || heldElsewhere || orphan) {
           await deleteDeck(deckId);
@@ -482,7 +488,7 @@ export function DeckList() {
           ? `「${deck.name}」をこの端末から削除します。\n⚠ この本は端末内だけにあります。削除すると復元できません。`
           : nonSync
             ? `「${deck.name}」をこの端末から削除し、クラウドに退避します（枠が空きます）。Proに戻すと復元できます（保持〜約6ヶ月）。`
-            : `「${deck.name}」をこの端末から削除します。\nこの本はクラウドにバックアップがあります。Proに戻せば、あとで「クラウド」から取り込み直せます。`;
+            : `「${deck.name}」をこの端末から削除します。\nこの本はクラウドに保存されているので、あとで「クラウド」から取り込み直せます。`;
       Alert.alert(
         "この端末から削除しますか?",
         msg,

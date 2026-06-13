@@ -224,10 +224,10 @@ export function Paywall({ locked = false }: { locked?: boolean }) {
         </Pressable>
 
         <Text style={styles.disclosure}>
-          Premiumには初回のみ7日間の無料トライアルが付きます。トライアル終了時、解約しない限りPremiumの
-          料金が自動で請求されます。サブスクリプションは、現在の期間終了の24時間前までに自動更新をオフに
-          しない限り自動更新されます。更新の管理・解約はiOSの「設定」→ Apple ID →「サブスクリプション」
-          から行えます。
+          Premiumには初回のみ7日間の無料トライアルが付きます（トライアル期間中のAI問題生成は30回までと
+          なります）。トライアル終了時、解約しない限りPremiumの料金が自動で請求されます。サブスクリプション
+          は、現在の期間終了の24時間前までに自動更新をオフにしない限り自動更新されます。更新の管理・解約は
+          iOSの「設定」→ Apple ID →「サブスクリプション」から行えます。
         </Text>
         <View style={styles.legalRow}>
           <Pressable onPress={() => Linking.openURL(TERMS_URL)} hitSlop={6}>

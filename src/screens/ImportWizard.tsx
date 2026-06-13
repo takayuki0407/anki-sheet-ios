@@ -16,7 +16,8 @@ import { useApp } from "../store/session";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import { stagePdf } from "../engine/setupEngine";
 import { importBookmarks, importDeck } from "../db/repo";
-import { syncNewDeck } from "../sync/deck";
+import { cachedQuota, syncNewDeck } from "../sync/deck";
+import { listBooks } from "../sync/api";
 import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "../types";
 import type { PdfDetectionResult } from "../engine/protocol";
 import { colors } from "../ui/theme";
@@ -122,10 +123,34 @@ export function ImportWizard() {
     const asset = res.assets[0];
     if (asset.size != null && asset.size > MAX_PDF_BYTES) {
       setErrMsg(
-        `PDFが大きすぎます（${Math.round(asset.size / 1024 / 1024)}MB）。1ファイル ${MAX_PDF_MB}MB までです。`,
+        `PDFが大きすぎます（${(asset.size / 1024 / 1024).toFixed(1)}MB）。1ファイル ${MAX_PDF_MB}MB までです。`,
       );
       setPhase("error");
       return;
+    }
+    // Account-wide cap gate (mirrors the web import). The server is the source of truth (register
+    // re-checks atomically), but without an upfront block a Free/Standard user could keep importing
+    // local-only books past the cap (a fail-open register 402 is otherwise silently swallowed).
+    // Offline → enforce the last-seen quota (errs toward blocking, never a bypass); never-synced
+    // falls open and the server re-checks on register.
+    try {
+      const acct = await listBooks();
+      if (!acct.unlimited && acct.count >= acct.limit) {
+        setErrMsg(
+          `本はプランの上限（${acct.limit} 冊）に達しています。不要な本を削除するか、上位プランにアップグレードしてください。`,
+        );
+        setPhase("error");
+        return;
+      }
+    } catch {
+      const q = await cachedQuota();
+      if (q && !q.unlimited && q.count >= q.limit) {
+        setErrMsg(
+          `本はプランの上限（${q.limit} 冊）に達しています（オフラインのため最後に確認した枠で判定）。オンラインに戻るか、不要な本を削除してください。`,
+        );
+        setPhase("error");
+        return;
+      }
     }
     const uri = await stagePdf(asset.uri);
     setStagedUri(uri);

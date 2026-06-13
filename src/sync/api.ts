@@ -160,8 +160,16 @@ export async function setDevTier(
 
 /** Erase ALL of the account's cloud data (R2 PDFs/content + D1 books/progress/tier). Call this
  * before deleting the auth user so account deletion also removes everything stored in the cloud. */
-export async function deleteAccountData(): Promise<void> {
-  const res = await authedFetch("/account", { method: "DELETE" });
+export async function deleteAccountData(explicitToken?: string): Promise<void> {
+  // An explicit token lets the caller purge cloud data AFTER deleteUser() — a Firebase ID token
+  // stays signature-valid (the server checks aud/iss/exp/sub, not live user existence) for ~1h, so
+  // capturing it before the delete avoids the "data purged but account still exists" inconsistency.
+  const token = explicitToken ?? (await idToken());
+  if (!token) throw new Error("not_signed_in");
+  const res = await fetch(`${SYNC_BASE}/account`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+  });
   if (!res.ok) throw new Error(`deleteAccount failed: ${res.status}`);
 }
 

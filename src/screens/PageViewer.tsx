@@ -85,25 +85,40 @@ function PageSlider({
 }) {
   const [trackW, setTrackW] = useState(0);
   const [drag, setDrag] = useState<number | null>(null); // 0..1 while scrubbing
+  const wrapRef = useRef<View>(null);
   // max is floored to 1 only for the percentage math — seeks are clamped to the REAL last page
   // (a 1-page book must not be able to seek to page 2).
-  const live = useRef({ trackW: 0, pct: 0, max: 1, last: 0, onSeek });
+  const live = useRef({ trackW: 0, trackX: 0, pct: 0, max: 1, last: 0, onSeek });
   live.current.trackW = trackW;
   live.current.max = Math.max(1, pageCount - 1);
   live.current.last = Math.max(0, pageCount - 1);
   live.current.onSeek = onSeek;
+
+  // Track origin in WINDOW coordinates. Positions must be computed from the absolute pageX —
+  // locationX is relative to whichever CHILD the finger lands on, so grabbing the thumb itself
+  // would read ~0 and jump the book to page 1.
+  const measure = () => {
+    wrapRef.current?.measureInWindow((x) => {
+      if (typeof x === "number") live.current.trackX = x;
+    });
+  };
 
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
-        const p = clamp01(e.nativeEvent.locationX / Math.max(1, live.current.trackW));
+        measure(); // refresh for subsequent moves (layout may have shifted)
+        const p = clamp01(
+          (e.nativeEvent.pageX - live.current.trackX) / Math.max(1, live.current.trackW),
+        );
         live.current.pct = p;
         setDrag(p);
       },
       onPanResponderMove: (e) => {
-        const p = clamp01(e.nativeEvent.locationX / Math.max(1, live.current.trackW));
+        const p = clamp01(
+          (e.nativeEvent.pageX - live.current.trackX) / Math.max(1, live.current.trackW),
+        );
         live.current.pct = p;
         setDrag(p);
       },
@@ -122,8 +137,12 @@ function PageSlider({
   const bubbleX = Math.max(0, Math.min(trackW - 56, pct * trackW - 28));
   return (
     <View
+      ref={wrapRef}
       style={styles.sliderWrap}
-      onLayout={(e) => setTrackW(e.nativeEvent.layout.width)}
+      onLayout={(e) => {
+        setTrackW(e.nativeEvent.layout.width);
+        measure();
+      }}
       {...pan.panHandlers}
     >
       <View style={styles.sliderTrack} />
