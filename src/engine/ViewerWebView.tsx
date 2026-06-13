@@ -82,6 +82,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
   const webRef = useRef<WebView>(null);
   const ready = useRef(false);
   const opened = useRef(false);
+  const goneCount = useRef(0); // consecutive WebView-process crashes (reset on a successful open)
 
   const dispatch = useCallback((payload: Record<string, unknown>) => {
     const json = JSON.stringify(payload);
@@ -104,7 +105,14 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
   const onProcessGone = useCallback(() => {
     ready.current = false;
     opened.current = false; // allow a fresh openBook once the reloaded engine signals "ready"
-    onError?.("ビューアを再読み込みしました");
+    goneCount.current += 1;
+    if (goneCount.current > 2) {
+      // Repeated crashes (a PDF too large for this device) → surface a real error instead of a
+      // silent reload loop. A transient jettison (count 1–2) recovers below via "ready" → sendOpen,
+      // so DON'T flash a terminal error for it — that was hiding the successfully-reloaded viewer.
+      onError?.("このPDFを表示できませんでした（メモリ不足の可能性）。");
+      return;
+    }
     webRef.current?.reload();
   }, [onError]);
 
@@ -154,6 +162,7 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
           sendOpen();
           break;
         case "book-ready":
+          goneCount.current = 0; // a successful open clears the crash streak
           onBookReady?.(m.pageCount ?? 0, m.page ?? 0);
           break;
         case "page-changed":

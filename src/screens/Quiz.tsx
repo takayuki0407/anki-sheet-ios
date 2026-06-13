@@ -638,6 +638,12 @@ function ListTab({
 
   const regenerate = (page: number, qtype: Qtype) => {
     if (!bookId || !pdfUrl || busyKey) return;
+    // No marked terms on this page → the model returns nothing. Block here so we never consume a
+    // generation slot, and (with generate.ts) never wipe the page's existing questions/history.
+    if (!(termsByPage.get(page) ?? []).length) {
+      setMsg(`P.${page + 1} には暗記箇所がありません。再生成できません。`);
+      return;
+    }
     Alert.alert(
       "再生成",
       `P.${page + 1} の${qtypeShort(qtype)}問題を作り直します（今の問題は置き換わり、生成枠を1回消費します）。よろしいですか？`,

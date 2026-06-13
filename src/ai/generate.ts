@@ -98,7 +98,9 @@ export async function generatePage(opts: {
     source: q.source ?? "",
     createdAt: now,
   }));
-  await savePageQuestions(opts.bookId, opts.pageIndex, opts.qtype, rows);
+  // Don't replace (delete-then-insert) when the model returned nothing — a no-terms regenerate must
+  // NOT wipe the page's existing questions and their SM-2 review history. Keep what's already there.
+  if (rows.length) await savePageQuestions(opts.bookId, opts.pageIndex, opts.qtype, rows);
   return { questions: rows, remaining: data.remaining, cached: data.cached };
 }
 

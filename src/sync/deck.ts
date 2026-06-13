@@ -369,6 +369,16 @@ export async function downloadDeck(book: AccountBook): Promise<number> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status >= 400) throw new Error(`download blob failed: ${res.status}`);
+  // Seed each card's createdAt (= the cloze's LWW timestamp) from the cloud content, NOT download
+  // time. Defaulting to now made a mask deleted on another device (an older tombstone) LOSE the
+  // merge and resurrect. Carry the original `t` through importDeck → insertCards (P0-2).
+  const clozes = activeClozes(normalizeContent(content, content.contentAt ?? 0)).map((e) => ({
+    pageIndex: e.pageIndex,
+    rects: e.rects,
+    bbox: e.bbox,
+    text: e.text ?? "",
+    t: e.t,
+  }));
   const deckId = await importDeck({
     name: content.name,
     stagedPdfUri: staged.uri,
@@ -376,7 +386,7 @@ export async function downloadDeck(book: AccountBook): Promise<number> {
     pageW: content.pageW,
     pageH: content.pageH,
     color: content.color,
-    clozes: content.clozes,
+    clozes,
   });
   await setMeta(bookKey(deckId), book.book_id);
   await setRegistered(deckId); // came from the account registry → orphan-cleanup eligible

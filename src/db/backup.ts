@@ -120,17 +120,21 @@ export async function exportBackup(): Promise<string> {
   }>("SELECT * FROM pdfs");
   const pdfs: BackupPdf[] = [];
   for (const p of pdfsRaw) {
-    // Resolve from the current container — the stored filePath may be stale after an app update.
-    const base64 = await new File(deckPdfFile(p.deckId).uri).base64();
-    pdfs.push({
-      id: p.id,
-      deckId: p.deckId,
-      name: p.name,
-      pageCount: p.pageCount,
-      pageW: p.pageW,
-      pageH: p.pageH,
-      blobDataUrl: PDF_PREFIX + base64,
-    });
+    try {
+      // Resolve from the current container — the stored filePath may be stale after an app update.
+      const base64 = await new File(deckPdfFile(p.deckId).uri).base64();
+      pdfs.push({
+        id: p.id,
+        deckId: p.deckId,
+        name: p.name,
+        pageCount: p.pageCount,
+        pageW: p.pageW,
+        pageH: p.pageH,
+        blobDataUrl: PDF_PREFIX + base64,
+      });
+    } catch {
+      // PDF実体が欠けている本はスキップ — 1冊の欠落で全バックアップを巻き添えにしない。
+    }
   }
 
   const cardsRaw = await db.getAllAsync<{
@@ -309,15 +313,22 @@ export async function importBackup(fileUri: string): Promise<void> {
         [r.questionId, r.bookId, r.ease, r.intervalD, r.reps, r.lapses, r.dueAt, r.lastAt, r.lastOk, r.updatedAt],
       );
     }
-    });
-
-    // DB committed — atomically replace the live PDF dir from staging.
+    // Replace PDF files INSIDE the transaction: keep the old library until every new file is in
+    // place, then drop the old orphans. A move failure rethrows → the DB transaction rolls back to
+    // the old state AND the old files were never pre-deleted, so a failed restore can no longer wipe
+    // the user's existing library.
     const decksDir = new Directory(Paths.document, "decks");
-    if (decksDir.exists) decksDir.delete();
     decksDir.create({ intermediates: true, idempotent: true });
     for (const p of data.pdfs) {
-      await new File(Paths.document, "decks.import", `${p.deckId}.pdf`).move(deckPdfFile(p.deckId));
+      const dest = deckPdfFile(p.deckId);
+      if (dest.exists) dest.delete();
+      await new File(Paths.document, "decks.import", `${p.deckId}.pdf`).move(dest);
     }
+    const keepUris = new Set(data.pdfs.map((p) => deckPdfFile(p.deckId).uri));
+    for (const entry of new Directory(Paths.document, "decks").list()) {
+      if (entry instanceof File && !keepUris.has(entry.uri)) entry.delete();
+    }
+    });
     if (staging.exists) staging.delete();
   });
 }
@@ -337,4 +348,28 @@ export async function clearAllLocalData(): Promise<void> {
   });
   const decksDir = new Directory(Paths.document, "decks");
   if (decksDir.exists) decksDir.delete();
+  // Also purge document-root staging / export / viewer-cards files so the previous account's PDF
+  // content and answers don't linger for the next account (engine/ is reusable and is kept).
+  try {
+    const staging = new Directory(Paths.document, "decks.import");
+    if (staging.exists) staging.delete();
+    for (const entry of new Directory(Paths.document).list()) {
+      if (!(entry instanceof File)) continue;
+      const name = entry.uri.split("/").pop() ?? "";
+      if (
+        name.startsWith("import-") ||
+        name.startsWith("sync-import-") ||
+        name.startsWith("viewer-cards-") ||
+        name === "kiokumate-backup.json"
+      ) {
+        try {
+          entry.delete();
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+  } catch {
+    /* best-effort cleanup — never block logout / account switch */
+  }
 }
