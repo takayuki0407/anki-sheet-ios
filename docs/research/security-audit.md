@@ -11,14 +11,14 @@
 
 | # | 重大度 | 項目 | 場所 | 修正 |
 |---|---|---|---|---|
-| A | Medium※ | Firebaseセッション（長命リフレッシュトークン）がAsyncStorage平文 | `src/auth/firebase.ts:31` | SecureStore/Keychainアダプタ。最優先 |
+| A | Medium※ | Firebaseセッション（長命リフレッシュトークン）がAsyncStorage平文 | `src/auth/firebase.ts:31` | ✅**実装済(2026-06-14)** SecureStore/Keychainアダプタ `src/auth/secureStorage.ts`（要実機検証） |
 | E | Low | WebView権限過剰＋メッセージオリジン未検証 | `src/engine/{Engine,Viewer}WebView.tsx` | 下記「WebView」節 |
 | B | Low | clientがproへfail-open | `src/iap/entitlements.ts:33` | ローカル専用Premium UIを起動時サーバーtierでゲート |
 | F | Low | プロンプト注入の追加緩和 | `../_ref-anki-sheet/functions/api/sync/generate.ts` | SYSTEM_PROMPTに未信頼データ宣言＋デリミタ |
 | C | Info | webhook secret非定数時間比較 | `../_ref-anki-sheet/functions/api/webhook/revenuecat.ts:78` | 定数時間比較 |
 | D | 任意 | 証明書ピンニング無し | — | 脅威モデル上**非実装が妥当** |
 
-※A：実害には物理的な端末侵害が前提。非脱獄＋パスコードなら実務上 Low。アプリ唯一・最大のハードニング。
+※A：実害には物理的な端末侵害が前提。非脱獄＋パスコードなら実務上 Low。アプリ唯一・最大のハードニング。**2026-06-14 実装済**：Firebase永続化を Keychain 直挿しに変更（キーを `[A-Za-z0-9._-]` にサニタイズ＋値を640字チャンク分割／`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` で iCloud同期・暗号化バックアップから除外／旧AsyncStorageセッションは初回起動で1回だけ移行→平文消去）。native module 追加につき**次ビルドに同梱して実機検証**が必要。
 
 別途：Firebase Web API キーを GCP コンソールで制限（App=iOSバンドルID／API=Identity Toolkit のみ）。`npm audit` の 14 moderate は全て Expo ビルド時ツール＝非ブロッカー（SDK昇格で解消）。
 
@@ -45,11 +45,11 @@
 
 ## 資格情報の保存
 
-- **直接AsyncStorage使用はアプリコードで`src/auth/firebase.ts:31`の1箇所のみ**（Firebase永続化＝IDトークン＋長命リフレッシュトークン、平文）。
-- **SecureStore/Keychain/Keystoreはどこにも未使用**（暗号化ストレージ0）。
+- ~~直接AsyncStorage使用は`src/auth/firebase.ts:31`の1箇所のみ（Firebase永続化＝平文）~~ → **2026-06-14：Firebase永続化を SecureStore/Keychain アダプタ（`src/auth/secureStorage.ts`）へ移行**。AsyncStorage は当該アダプタ内の「旧セッション1回移行→消去」専用に縮小。
+- **SecureStore/Keychain 採用**（Firebaseセッションのみ。`keychainService:"kiokumate.auth"`／`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`＝iCloud同期・暗号化バックアップ除外）。
 - 加えて短命IDトークンをSQLite `meta` `pendingAccountPurge`（`src/auth/account.ts:176`、purge成功で消去）に一時保存。
 - Firebase/RC公開キーはバンドル内（`EXPO_PUBLIC_*`、公開前提）。サーバー秘密はクライアントに無し。
-- **移行判断**：Firebaseセッションのみ Keychain/Keystore 推奨（=Finding A、launch非ブロッカー）。非機密状態（onboarded/favorite/tier cache）は移行不要（過剰移行しない）。
+- **移行判断**：Firebaseセッションのみ Keychain/Keystore 推奨（=Finding A、launch非ブロッカー）→ **実装完了(2026-06-14)**。非機密状態（onboarded/favorite/tier cache）は移行不要（過剰移行しない）。
 
 ## WebView postMessage / onMessage
 

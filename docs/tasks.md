@@ -6,8 +6,10 @@
 
 ## 🔥 次のセッションで着手（優先順）
 
-- [ ] **セキュリティ A**：Firebaseセッション（リフレッシュトークン）を SecureStore/Keychain へ（`src/auth/firebase.ts:31`）。アプリ唯一・最大のハードニング。
-- [ ] **1.0.1 提出**：1.0.0（Build 4）承認後、監査修正入り Build 8 を `app.json` 1.0.1 にして提出（手順は HANDOFF.md）。
+- [x] **セキュリティ A**：Firebaseセッションを SecureStore/Keychain アダプタ化（`src/auth/secureStorage.ts`／`firebase.ts:31`）。実装＋`tsc`通過（2026-06-14）。**要実機検証**。
+- [ ] **セキュリティ A 実機検証**：次ビルドで「初回起動の旧セッション移行→再起動でログイン維持／サインアウトで Keychain 消去」を TestFlight 確認。
+- [ ] **1.0.1 ビルド方針**：A を既存 Build 8（監査修正入り）に同梱して再ビルドするか、Build 8 はそのまま出し A を 1.0.2 へ回すか（HANDOFF.md ⑤）。
+- [ ] **1.0.1 提出**：1.0.0（Build 4）承認後、`app.json` 1.0.1 にして提出（手順は HANDOFF.md）。
 - [ ] **web backend デプロイ**：#11/#17 を本番反映＋未pushコミットを push。
 
 ---
@@ -26,6 +28,7 @@
 - [x] セッション管理ファイル整備（CLAUDE.md / tasks.md / /checkpoint / /wrap-up）（2026-06-14）
 - [x] 追加セキュリティ調査：プロンプト注入／プラン強制（今日の復習）／WebViewオリジン／トークン保管（2026-06-14）
 - [x] AGENTS.md 参照SDK修正（v56→v54）・監査を docs/research/ に正本化・Claudeメモリをポインタ化（2026-06-14）
+- [x] セキュリティ A 実装：Firebaseセッション → SecureStore/Keychain アダプタ（`secureStorage.ts`・要実機検証）（2026-06-14）
 
 ---
 

@@ -45,7 +45,7 @@
 
 セキュリティ・ハードニング・バックログ（2026-06-13 監査、**Critical/High なし**。詳細は `docs/research/security-audit.md`）：
 
-- [ ] **A (Medium)** Firebaseセッション（長命リフレッシュトークン）が AsyncStorage 平文 — `src/auth/firebase.ts:31`。SecureStore/Keychain アダプタへ。**最優先**。
+- [x] **A (Medium)** → **解決済み（2026-06-14）**：Firebaseセッションを SecureStore/Keychain アダプタ化（下「解決済みの課題」参照）。**要実機検証**。
 - [ ] **E (Low)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：`allowUniversalAccessFromFileURLs` 除去・`originWhitelist` 限定・`onShouldStartLoadWithRequest` 追加・onMessage で `nativeEvent.url` 検証。
 - [ ] **B (Low)** `src/iap/entitlements.ts:33` が pro へフェイルオープン（サーバー強制済＝影響はローカルUIのみ）。
 - [ ] **F (Low)** プロンプト注入ハードニング — `_ref-anki-sheet/functions/api/sync/generate.ts` の SYSTEM_PROMPT に「未信頼データ」宣言＋デリミタ。
@@ -63,6 +63,7 @@
 - [x] セキュリティ審査5観点（認証/課金/通信/同期/入出力）＝**Critical/High なし**を確認（2026-06-13）。
 - [x] **AGENTS.md の参照SDK不整合を修正**：v56 → **v54**（稼働中 Expo SDK に一致。`package.json` で裏取り）（2026-06-14）。
 - [x] **ドキュメント正本化**：セキュリティ監査を `docs/research/` の実ファイルに集約、CLAUDE.md を実パス参照に統一（Claudeメモリ参照のデッドリンク解消）、Windows絶対パスを相対化、メモリはポインタ化（2026-06-14）。
+- [x] **セキュリティ A（最優先ハードニング）実装（2026-06-14）**：Firebase セッション永続化を AsyncStorage平文 → **SecureStore/Keychain アダプタ**（新設 `src/auth/secureStorage.ts`、`firebase.ts:31` 差し替え、`expo-secure-store ~15.0.8`＋app.json plugin）。キーサニタイズ＋値640字チャンク分割＋旧セッション1回移行→平文消去。`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`（iCloud/暗号化バックアップ除外）。`tsc` 通過。**native module追加につき要実機検証（次ビルド同梱）**。
 
 ---
 
@@ -72,19 +73,22 @@
 - **プロンプト注入**：system/userロール分離＋JSON出力検証＋quotaで contained（Low）。唯一の不足＝Finding F。
 - **プラン強制**：AI生成・復習クラウド同期はサーバー権威（402/403）。「今日の復習」起動のみクライアントゲート（ローカル限定機能）。
 - **依存・シークレット**：gitleaks クリーン（検出は公開前提キーのみ・`.env` は gitignore 済）。depcheck の typescript / expo-dev-client は誤検出（保持）。
+- **トークン保管（Finding A 実装根拠）**：iOS Keychain 制約2点＝キーは `[A-Za-z0-9._-]` のみ（Firebaseの `:` 不可→サニタイズ）／値 ~2048B 超で拒否されうる（認証blobは超え得る→640字チャンク＋manifest）。自作AESは不採用（expo-crypto に AES 無し）、ファーストパーティ `expo-secure-store` のみで完結。
 - 参照：`docs/research/security-audit.md` / `docs/research/security-scan-tooling.md`。
 
 ---
 
 ## 📋 次のセッションでやること
 
-1. **セキュリティ A**（Firebaseセッション → SecureStore/Keychain）に着手。
-2. 1.0.0（Build 4）承認後 → **1.0.1（監査修正入り Build 8）を提出**（手順は HANDOFF.md）。
-3. web backend（#11/#17）本番デプロイ＋未pushコミットの push。
-4. Android トラック：Play登録・Google Sign-In・RevenueCat Android・ストア素材。
+1. **セキュリティ A 実機検証**：`expo-secure-store` は native module → 次ビルドに同梱し、TestFlight で「初回起動の旧セッション移行→再起動でログイン維持／サインアウトで Keychain 消去」を確認。
+2. **1.0.1 ビルド方針の確定**：A を既存 Build 8（監査修正入り）に同梱して再ビルドするか、Build 8 はそのまま出し A を 1.0.2 に回すか（HANDOFF.md ⑤）。
+3. 1.0.0（Build 4）承認後 → 1.0.1 提出（手順は HANDOFF.md）。
+4. web backend（#11/#17）本番デプロイ＋未pushコミットの push。
+5. Android トラック：Play登録・Google Sign-In・RevenueCat Android・ストア素材。
 
 ---
 
 ## 📝 セッション履歴
 
 - **2026-06-13〜14**：ローンチ前監査19件修正・Build 8投入。セキュリティ審査（5観点・プロンプト注入・プラン強制・WebViewオリジン・トークン保管）実施＝Crit/High なし→バックログ A–F 化。依存/シークレットスキャン（npm audit / gitleaks / depcheck）。セッション管理ファイル（CLAUDE.md / tasks.md / `/checkpoint` / `/wrap-up`）整備。終盤に **AGENTS.md を v54 に修正**・監査を `docs/research/` へ正本化・メモリをポインタ化。
+- **2026-06-14（本セッション）**：6/14文書を git 正本化コミット（`d415a6d`）。**セキュリティ A 実装**＝Firebaseセッションを SecureStore/Keychain アダプタ化（`src/auth/secureStorage.ts` 新設・`firebase.ts` 差し替え・`expo-secure-store ~15.0.8`＋app.json plugin）。`tsc` 通過・要実機検証。監査正本／tasks を更新。

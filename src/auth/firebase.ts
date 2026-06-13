@@ -3,7 +3,7 @@
 // Firebase project (Project settings → your Web/iOS app), via EXPO_PUBLIC_FIREBASE_*.
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import * as fbAuth from "firebase/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { secureStorePersistence } from "./secureStorage";
 
 const cfg = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? "",
@@ -21,14 +21,15 @@ export function getFirebaseAuth(): fbAuth.Auth | null {
   if (!isAuthConfigured) return null;
   if (!auth) {
     const app: FirebaseApp = getApps().length ? getApp() : initializeApp(cfg);
-    // RN persistence so the session survives restarts (API shape varies across firebase
-    // versions, so resolve it defensively and fall back to default persistence).
+    // Keychain-backed persistence so the session (incl. the long-lived refresh token)
+    // survives restarts without sitting in plaintext — see ./secureStorage. The
+    // persistence API shape varies across firebase versions, so resolve it defensively.
     const getRNP = (
       fbAuth as unknown as { getReactNativePersistence?: (s: unknown) => fbAuth.Persistence }
     ).getReactNativePersistence;
     try {
       auth = getRNP
-        ? fbAuth.initializeAuth(app, { persistence: getRNP(AsyncStorage) })
+        ? fbAuth.initializeAuth(app, { persistence: getRNP(secureStorePersistence) })
         : fbAuth.getAuth(app);
     } catch {
       auth = fbAuth.getAuth(app); // already initialized
