@@ -31,7 +31,7 @@
 - **アプリ**：Kiokumate（キオクメイト）— PDF教材を赤シートで暗記する iOS アプリ。運営：TK Dev Lab（tkdevlab.com）。本番API：`https://kiokumate.tkdevlab.com`。
 - **スタック**：Expo SDK 54 / React Native 0.81.5。EAS Build/Submit（`appVersionSource: remote` ＋ `autoIncrement`）。ナビゲーションは自前の単一スタック（zustand `useApp`）。
 - **バックエンド**：Cloudflare Pages Functions ＋ D1（`anki-sheet-db`）＋ R2（`anki-sheet-pdfs`）。別リポジトリ `../_ref-anki-sheet`（本リポジトリと同階層）。
-- **認証**：Firebase Auth（メール＋Apple Sign-In）。**サインイン必須**（Apple 5.1.1(v)）。サーバーは Firebase ID トークンを Web Crypto で検証（RS256・aud/iss/exp・`functions/_lib/auth.ts`）。
+- **認証**：Firebase Auth（メール＋Apple Sign-In）。**サインイン必須**（Apple 5.1.1(v)）。サーバーは Firebase ID トークンを Web Crypto で検証（RS256・aud/iss/exp・`functions/_lib/auth.ts`）。**セッション永続化はクライアント側で iOS Keychain**（`src/auth/secureStorage.ts`／expo-secure-store。AsyncStorage平文ではない。キーサニタイズ＋値チャンク分割でラップ）。
 - **課金**：RevenueCat（IAP）。tier は **D1 `users.tier`（RevenueCat webhook が権威）**。Free ¥0(本1/AI月1) / Standard ¥300(本10/AI月10) / Pro ¥600(無制限・クラウド同期・AI月30) / Premium ¥980(＋「今日の復習」SRS・AI月100)。7日間トライアル。
 - **AI問題生成**：**サーバー専用 `ANTHROPIC_API_KEY`**、Claude Haiku（`/api/sync/generate`）。クライアントに鍵なし。tier＋月次quotaはサーバーが原子的に強制。
 - **データ同期**：全 `/api/sync/*` ルートは検証済 `uid` スコープ（IDOR なし）。R2 キーは `${uid}/...` 名前空間。clozes/bookmarks/reviews は LWW マージ。
@@ -45,7 +45,6 @@
 
 セキュリティ・ハードニング・バックログ（2026-06-13 監査、**Critical/High なし**。詳細は `docs/research/security-audit.md`）：
 
-- [x] **A (Medium)** → **解決済み（2026-06-14）**：Firebaseセッションを SecureStore/Keychain アダプタ化（下「解決済みの課題」参照）。**要実機検証**。
 - [ ] **E (Low)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：`allowUniversalAccessFromFileURLs` 除去・`originWhitelist` 限定・`onShouldStartLoadWithRequest` 追加・onMessage で `nativeEvent.url` 検証。
 - [ ] **B (Low)** `src/iap/entitlements.ts:33` が pro へフェイルオープン（サーバー強制済＝影響はローカルUIのみ）。
 - [ ] **F (Low)** プロンプト注入ハードニング — `_ref-anki-sheet/functions/api/sync/generate.ts` の SYSTEM_PROMPT に「未信頼データ」宣言＋デリミタ。
@@ -91,4 +90,4 @@
 ## 📝 セッション履歴
 
 - **2026-06-13〜14**：ローンチ前監査19件修正・Build 8投入。セキュリティ審査（5観点・プロンプト注入・プラン強制・WebViewオリジン・トークン保管）実施＝Crit/High なし→バックログ A–F 化。依存/シークレットスキャン（npm audit / gitleaks / depcheck）。セッション管理ファイル（CLAUDE.md / tasks.md / `/checkpoint` / `/wrap-up`）整備。終盤に **AGENTS.md を v54 に修正**・監査を `docs/research/` へ正本化・メモリをポインタ化。
-- **2026-06-14（本セッション）**：6/14文書を git 正本化コミット（`d415a6d`）。**セキュリティ A 実装**＝Firebaseセッションを SecureStore/Keychain アダプタ化（`src/auth/secureStorage.ts` 新設・`firebase.ts` 差し替え・`expo-secure-store ~15.0.8`＋app.json plugin）。`tsc` 通過・要実機検証。監査正本／tasks を更新。
+- **2026-06-14（本セッション）**：6/14文書を git 正本化（`d415a6d`）。**セキュリティ A 実装**＝Firebaseセッションを SecureStore/Keychain アダプタ化（`src/auth/secureStorage.ts` 新設・`firebase.ts` 差し替え・`expo-secure-store ~15.0.8`＋app.json plugin）、`tsc`＋チャンクロジック検証9/9・要実機検証（`47b4450`）。監査正本／CLAUDE.md／tasks を更新、`../HANDOFF.md` を現状（iOS HEAD・未push8件・A状況）へ同期。iOS main は origin より **8コミット先行＝未push**。
