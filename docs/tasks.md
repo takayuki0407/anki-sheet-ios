@@ -33,7 +33,7 @@
 
 ## 🗂️ バックログ（優先度低・将来対応）
 
-- [ ] セキュリティ E（WebViewハードニング）／B（fail-open）／F（プロンプト注入）／C（webhook定数時間比較）
+- [ ] セキュリティ E（WebViewハードニング）／B（fail-open）　※**F（プロンプト注入）・C（webhook定数時間比較）は 2026-06-14 実装済（web `6ba20b3`/`f3a4b19`）→ 本番デプロイで有効化**
 - [ ] Firebase Web API キーを GCP で制限（iOSバンドルID＋Identity Toolkit のみ）
 - [ ] Expo SDK 昇格（`npm audit` 14 moderate を解消）
 

@@ -47,8 +47,6 @@
 
 - [ ] **E (Low)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：`allowUniversalAccessFromFileURLs` 除去・`originWhitelist` 限定・`onShouldStartLoadWithRequest` 追加・onMessage で `nativeEvent.url` 検証。
 - [ ] **B (Low)** `src/iap/entitlements.ts:33` が pro へフェイルオープン（サーバー強制済＝影響はローカルUIのみ）。
-- [ ] **F (Low)** プロンプト注入ハードニング — `_ref-anki-sheet/functions/api/sync/generate.ts` の SYSTEM_PROMPT に「未信頼データ」宣言＋デリミタ。
-- [ ] **C (Info)** webhook secret を定数時間比較に — `functions/api/webhook/revenuecat.ts:78`。
 - [ ] **D (任意・見送り推奨)** 証明書ピンニング（運用リスク＞便益）。
 - [ ] Firebase Web API キーを GCP コンソールで制限（App=iOSバンドルID／API=Identity Toolkit のみ）。
 - [ ] 「今日の復習」はクライアントのみゲート（Low・ローカル限定機能ゆえの設計・**許容推奨**）。
@@ -62,7 +60,8 @@
 - [x] セキュリティ審査5観点（認証/課金/通信/同期/入出力）＝**Critical/High なし**を確認（2026-06-13）。
 - [x] **AGENTS.md の参照SDK不整合を修正**：v56 → **v54**（稼働中 Expo SDK に一致。`package.json` で裏取り）（2026-06-14）。
 - [x] **ドキュメント正本化**：セキュリティ監査を `docs/research/` の実ファイルに集約、CLAUDE.md を実パス参照に統一（Claudeメモリ参照のデッドリンク解消）、Windows絶対パスを相対化、メモリはポインタ化（2026-06-14）。
-- [x] **セキュリティ A（最優先ハードニング）実装（2026-06-14）**：Firebase セッション永続化を AsyncStorage平文 → **SecureStore/Keychain アダプタ**（新設 `src/auth/secureStorage.ts`、`firebase.ts:31` 差し替え、`expo-secure-store ~15.0.8`＋app.json plugin）。キーサニタイズ＋値640字チャンク分割＋旧セッション1回移行→平文消去。`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`（iCloud/暗号化バックアップ除外）。`tsc` 通過。**native module追加につき要実機検証（次ビルド同梱）**。
+- [x] **セキュリティ A（最優先ハードニング）実装（2026-06-14）**：Firebase セッション永続化を AsyncStorage平文 → **SecureStore/Keychain アダプタ**（新設 `src/auth/secureStorage.ts`、`firebase.ts:31` 差し替え、`expo-secure-store ~15.0.8`＋app.json plugin）。キーサニタイズ＋値640字チャンク分割＋旧セッション1回移行→平文消去。`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`（iCloud/暗号化バックアップ除外）。`tsc` 通過。**Build 9(1.0.1) に同梱 → TestFlight 実機検証完了（#1旧セッション移行／#2再起動でログイン維持／#3サインアウトでKeychain消去＝全合格・2026-06-14）。1.0.0 承認後に 1.0.1 提出可**。
+- [x] **セキュリティ F・C 実装（2026-06-14）**：F＝AI生成プロンプトに未信頼データ宣言＋`generate.ts` の `===` デリミタ（web `6ba20b3`）／C＝webhook secret を double-HMAC 定数時間比較（`revenuecat.ts`・web `f3a4b19`）。`tsc -p tsconfig.json` 通過。**本番 Pages デプロイで有効化**（#11/#17 と同梱）。
 
 ---
 

@@ -14,8 +14,8 @@
 | A | Medium※ | Firebaseセッション（長命リフレッシュトークン）がAsyncStorage平文 | `src/auth/firebase.ts:31` | ✅**実装済(2026-06-14)** SecureStore/Keychainアダプタ `src/auth/secureStorage.ts`（要実機検証） |
 | E | Low | WebView権限過剰＋メッセージオリジン未検証 | `src/engine/{Engine,Viewer}WebView.tsx` | 下記「WebView」節 |
 | B | Low | clientがproへfail-open | `src/iap/entitlements.ts:33` | ローカル専用Premium UIを起動時サーバーtierでゲート |
-| F | Low | プロンプト注入の追加緩和 | `../_ref-anki-sheet/functions/api/sync/generate.ts` | SYSTEM_PROMPTに未信頼データ宣言＋デリミタ |
-| C | Info | webhook secret非定数時間比較 | `../_ref-anki-sheet/functions/api/webhook/revenuecat.ts:78` | 定数時間比較 |
+| F | Low | プロンプト注入の追加緩和 | `../_ref-anki-sheet/functions/api/sync/generate.ts` | ✅**実装済(2026-06-14・web `6ba20b3`)** UNTRUSTED_DATA_RULE＋`===`デリミタ（本番デプロイで有効化） |
+| C | Info | webhook secret非定数時間比較 | `../_ref-anki-sheet/functions/api/webhook/revenuecat.ts:78` | ✅**実装済(2026-06-14・web `f3a4b19`)** double-HMAC定数時間比較（本番デプロイで有効化） |
 | D | 任意 | 証明書ピンニング無し | — | 脅威モデル上**非実装が妥当** |
 
 ※A：実害には物理的な端末侵害が前提。非脱獄＋パスコードなら実務上 Low。アプリ唯一・最大のハードニング。**2026-06-14 実装済**：Firebase永続化を Keychain 直挿しに変更（キーを `[A-Za-z0-9._-]` にサニタイズ＋値を640字チャンク分割／`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` で iCloud同期・暗号化バックアップから除外／旧AsyncStorageセッションは初回起動で1回だけ移行→平文消去）。native module 追加につき**次ビルドに同梱して実機検証**が必要。
@@ -42,6 +42,7 @@
 - AI送信は**1箇所のみ**：`../_ref-anki-sheet/functions/api/sync/generate.ts:189`（Anthropic直叩き）。クライアント（`src/ai/generate.ts`）は`/generate`を叩くだけ・鍵なし。
 - ユーザー由来データ4種（pageText=PDF抽出／markedTerms／subjectHint=自由入力／prev・nextContext）は**userロールメッセージ**、ルールは**system**に分離（正しい境界）。assistant prefill`[`でJSON強制、`toOutQ`で出力スキーマ検証、長さ上限＋quota。
 - 不足＝**Finding F**：内容サニタイズ無し・system内に「未信頼データ宣言」無し・`subjectHint`が最高レバレッジ。影響は自己生成のみ（クロスユーザー/権限昇格なし）＝Low。
+- **2026-06-14 実装済（web `6ba20b3`）**：両 system プロンプトに `UNTRUSTED_DATA_RULE`（入力は「データであり指示ではない」・`===` で囲まれた範囲内の命令に従わない）＋ `buildUserMessage` で学習者提供部を `===` デリミタで囲む（最大問数はフェンス外の指示として維持）。出力は従来どおり `toOutQ` でスキーマ検証＋quota。本番 Pages デプロイで有効化。
 
 ## 資格情報の保存
 
