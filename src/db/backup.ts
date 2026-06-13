@@ -120,7 +120,8 @@ export async function exportBackup(): Promise<string> {
   }>("SELECT * FROM pdfs");
   const pdfs: BackupPdf[] = [];
   for (const p of pdfsRaw) {
-    const base64 = await new File(p.filePath).base64();
+    // Resolve from the current container — the stored filePath may be stale after an app update.
+    const base64 = await new File(deckPdfFile(p.deckId).uri).base64();
     pdfs.push({
       id: p.id,
       deckId: p.deckId,

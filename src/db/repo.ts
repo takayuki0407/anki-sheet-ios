@@ -158,7 +158,10 @@ export async function getDeck(deckId: number): Promise<DeckRow | undefined> {
 export async function getDeckPdf(deckId: number): Promise<PdfRow | undefined> {
   const db = await getDb();
   const r = await db.getFirstAsync<PdfRow>("SELECT * FROM pdfs WHERE deckId = ? LIMIT 1", [deckId]);
-  return r ?? undefined;
+  // `filePath` was stored at import as an ABSOLUTE file:// path, but iOS can reassign the app's
+  // data-container path on update — leaving that stored path stale (the book shows but won't open).
+  // The file itself persists at decks/<deckId>.pdf, so always resolve from the CURRENT document dir.
+  return r ? { ...r, filePath: deckPdfFile(deckId).uri } : undefined;
 }
 
 export async function answerCount(deckId: number): Promise<number> {
