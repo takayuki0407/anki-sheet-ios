@@ -171,9 +171,39 @@ export function DeckList() {
       // failed trim download). Those aren't on any bookshelf, so this is the ONLY place to free their
       // account slot on a non-sync tier; gating on `device` would strand them. A self-deleted book
       // never flashes here (retain → non-active, plus removeFromCloud). Download stays Pro-only + size>0.
+      // Self-stale cleanup: a book whose holder is THIS device's own label, with no local copy AND
+      // no cloud file (size 0), is a phantom left when a local wipe (e.g. the account-switch
+      // clearAllLocalData) removed the local deck while the account registration survived — logout
+      // never frees size-0 slots (releaseLocalSlotsOnLogout went unused). "Held by me / not on me /
+      // no blob" is contradictory and unrecoverable, so silently free the slot rather than show it as
+      // a phantom that eats the cap. ONLY the exact self-label + size-0 case is auto-removed (never
+      // another device's book, never a re-downloadable size>0 copy), so real data is never touched.
+      const isSelfLabel = (d: string | null | undefined): boolean =>
+        d != null && (d === me || (prevMe != null && d === prevMe));
+      const selfStale = acct.books.filter(
+        (b) => active.has(b.book_id) && !local.has(b.book_id) && b.size === 0 && isSelfLabel(b.device),
+      );
+      const staleIds = new Set<string>();
+      for (const b of selfStale) {
+        try {
+          await unregisterBook(b.book_id);
+          staleIds.add(b.book_id); // only HIDE phantoms we actually freed
+        } catch {
+          /* offline / server hiccup — leave visible so it stays manually removable; retried next load */
+        }
+      }
+      if (staleIds.size) {
+        void cacheQuota({
+          count: Math.max(0, acct.count - staleIds.size),
+          limit: acct.limit,
+          unlimited: acct.unlimited,
+          tier: acct.tier,
+        }); // keep the offline cap cache honest after freeing the slot(s)
+      }
       setCloud(
         acct.books.filter((b) => {
           if (!active.has(b.book_id) || local.has(b.book_id)) return false;
+          if (staleIds.has(b.book_id)) return false; // just unregistered → never show as a phantom
           return true;
         }),
       );
