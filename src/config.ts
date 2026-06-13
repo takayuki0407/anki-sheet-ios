@@ -5,7 +5,7 @@
 //   https://takayuki0407.github.io/anki-sheet-ios/privacy.html (etc.)
 
 /** Support / contact email (opened from the help screen's お問い合わせ). */
-export const SUPPORT_EMAIL = "zabieru.0407@gmail.com";
+export const SUPPORT_EMAIL = "kiokumate@tkdevlab.com";
 
 /** Public URLs for the legal docs (required by App Store review).
  * Served from the Cloudflare deployment — drop docs/privacy.html & docs/terms.html there
