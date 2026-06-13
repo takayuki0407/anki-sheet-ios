@@ -101,6 +101,13 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
     sendOpen();
   }, [open, sendOpen]);
 
+  const onProcessGone = useCallback(() => {
+    ready.current = false;
+    opened.current = false; // allow a fresh openBook once the reloaded engine signals "ready"
+    onError?.("ビューアを再読み込みしました");
+    webRef.current?.reload();
+  }, [onError]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -205,6 +212,12 @@ export const ViewerWebView = forwardRef<ViewerHandle, Props>(function ViewerWebV
         allowingReadAccessToURL={documentDirUri()}
         onMessage={onMessage}
         onError={(e) => onError?.("webview: " + e.nativeEvent.description)}
+        // If the WebView process is jettisoned (memory pressure), reset the ready/opened latches and
+        // reload so the recovered engine re-emits "ready" → sendOpen re-dispatches openBook. Without
+        // this the viewer goes permanently blank (opened.current stays true, so no re-open fires).
+        // onRenderProcessGone = Android; onContentProcessDidTerminate = iOS (WKWebView) — bind both.
+        onRenderProcessGone={onProcessGone}
+        onContentProcessDidTerminate={onProcessGone}
         // The page content scrolls via THIS native WKWebView scroll view, so iOS provides
         // Safari-grade momentum AND directional lock (a near-vertical swipe won't drift sideways).
         // directionalLockEnabled = UIScrollView.isDirectionalLockEnabled. Custom pinch-zoom is done

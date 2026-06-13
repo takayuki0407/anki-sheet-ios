@@ -93,6 +93,20 @@ export const EngineWebView = forwardRef<EngineHandle, Props>(function EngineWebV
     [send],
   );
 
+  // Reject every awaiting request and reload the engine — used when the WebView process dies on
+  // either platform, so a hung detection/pageText call surfaces an error instead of spinning forever.
+  const failPending = useCallback(
+    (reason: string) => {
+      pending.current.forEach((p) =>
+        p.reject(new Error("WebViewが再起動しました。もう一度お試しください。")),
+      );
+      pending.current.clear();
+      onLog?.(reason);
+      webRef.current?.reload();
+    },
+    [onLog],
+  );
+
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
       let m: { type?: string; reqId?: string; [k: string]: unknown };
@@ -160,13 +174,12 @@ export const EngineWebView = forwardRef<EngineHandle, Props>(function EngineWebV
         onMessage={onMessage}
         onError={(e) => onLog?.("webview error: " + e.nativeEvent.description)}
         onHttpError={(e) => onLog?.("http " + e.nativeEvent.statusCode)}
-        onRenderProcessGone={() => {
-          // iOS jettisoned the WebView (e.g. memory) — fail any awaiting requests instead
-          // of leaving them to hang forever.
-          pending.current.forEach((p) => p.reject(new Error("WebViewが再起動しました。もう一度お試しください。")));
-          pending.current.clear();
-          onLog?.("webview process gone");
-        }}
+        // The WebView process was jettisoned (e.g. memory pressure). Fail any awaiting requests
+        // instead of leaving them to hang forever. onRenderProcessGone is ANDROID-only;
+        // onContentProcessDidTerminate is the iOS (WKWebView) equivalent — bind BOTH or an iOS
+        // termination during detection leaves the import spinner stuck indefinitely.
+        onRenderProcessGone={() => failPending("webview process gone (android)")}
+        onContentProcessDidTerminate={() => failPending("webview content process terminated (ios)")}
         style={styles.fill}
       />
     </View>

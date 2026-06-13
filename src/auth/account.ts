@@ -22,6 +22,7 @@ import { deleteAccountData } from "../sync/api";
 import { getMeta, setMeta } from "../db/repo";
 import { clearAllLocalData } from "../db/backup";
 import { loadDeviceName } from "../sync/device";
+import { useApp } from "../store/session";
 
 export interface AccountUser {
   uid: string;
@@ -68,6 +69,9 @@ export function initAuthListener(): void {
           // The wipe emptied the meta table — reload the in-memory device-name cache so the new
           // account doesn't keep registering books under the previous user's custom device name.
           await loadDeviceName();
+          // Force the bookshelf to re-query the (now empty) DB — without this the previous account's
+          // books linger on screen until the next navigation (the wipe doesn't re-render on its own).
+          useApp.getState().bumpDecks();
         }
         await setMeta("ownerUid", u.uid);
       })();

@@ -110,12 +110,17 @@ export function DowngradeSelect({
                   void deleteBookQuestions(bid).catch(() => {});
                 }
               }
-              // Materialize kept books not on THIS device (now allowed on any tier for active books),
-              // then CLAIM the holder — but only AFTER a successful download, so a failure never
-              // leaves the book with no device (it stays in the cloud section as "ダウンロード待ち").
               const me = deviceLabel();
               for (const b of books) {
-                if (keep.has(b.book_id) && !ids.has(b.book_id) && b.size > 0) {
+                if (!keep.has(b.book_id)) continue;
+                if (ids.has(b.book_id)) {
+                  // Already local: claim the holder if another device currently holds it, otherwise
+                  // single-home reconcile would delete this kept copy on the next bookshelf sync.
+                  if (b.device !== me) await updateBookMeta(b.book_id, { device: me }).catch(() => {});
+                } else if (b.size > 0) {
+                  // Not on this device: materialize it (allowed on any tier for active books), then
+                  // CLAIM the holder — but only AFTER a successful download, so a failure never
+                  // leaves the book with no device (stays in the cloud section as "ダウンロード待ち").
                   try {
                     await downloadDeck(b);
                     await updateBookMeta(b.book_id, { device: me }).catch(() => {});

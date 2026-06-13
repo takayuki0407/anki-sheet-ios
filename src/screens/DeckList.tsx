@@ -37,6 +37,7 @@ import {
   downloadDeck,
   isRegistered,
   localBookIds,
+  releaseLocalBookSlot,
   setRegistered,
 } from "../sync/deck";
 import { deviceLabel, previousDeviceLabel } from "../sync/device";
@@ -238,9 +239,14 @@ export function DeckList() {
       setDownloading((s) => new Set(s).add(b.book_id));
       try {
         await downloadDeck(b);
-        // Stamp THIS device as the current holder so the cloud list (on other devices) shows where
-        // the book is now, not just who first imported it.
-        void updateBookMeta(b.book_id, { device: deviceLabel() }).catch(() => {});
+        // Claim the holder BEFORE the next reconcile runs (await, with one retry): on a single-home
+        // tier, a book whose server `device` is still another device gets deleted as held-elsewhere
+        // on the next loadCloud — so a just-downloaded book must be stamped as ours first.
+        try {
+          await updateBookMeta(b.book_id, { device: deviceLabel() });
+        } catch {
+          await updateBookMeta(b.book_id, { device: deviceLabel() }).catch(() => {});
+        }
         bumpDecks();
         await load();
         setCloud((c) => c.filter((x) => x.book_id !== b.book_id));
@@ -502,25 +508,15 @@ export function DeckList() {
             text: "削除",
             style: "destructive",
             onPress: async () => {
-              // size=0 (no cloud copy) → unregister (permanent, frees the slot). size>0 on a non-sync
-              // tier → retain (active→retained: frees the slot, keeps R2, restorable on re-Pro).
-              // size>0 on Pro+ → keep active (re-downloadable); just release the holder if we held it.
               const bid = await deckBookId(deck.id);
               await deleteDeck(deck.id);
               if (bid) {
                 void deleteBookQuestions(bid).catch(() => {}); // drop this device's AI questions
-                if (cloudReadyRef.current && !cloudBlobIdsRef.current.has(bid)) {
-                  void unregisterBook(bid).catch(() => {}); // no cloud copy → free the slot
-                } else if (cloudReadyRef.current && cloudBlobIdsRef.current.has(bid) && nonSync) {
-                  void retainBook(bid).catch(() => {}); // Standard/Free → retain (free slot, keep R2)
-                } else if (
-                  cloudReadyRef.current &&
-                  cloudBlobIdsRef.current.has(bid) &&
-                  cloudDeviceByDeckRef.current.get(deck.id) === deviceLabel()
-                ) {
-                  // Pro+ holder → keep active, just release the holder (now cloud-only).
-                  void updateBookMeta(bid, { device: null }).catch(() => {});
-                }
+                // Free the account slot from the CURRENT server state (size=0 → unregister, non-sync
+                // cloud-backed → retain, Pro+ holder → release holder). Re-fetching avoids the stale
+                // snapshot race where a book another device just uploaded (size 0→>0) would be
+                // unregistered — deleting its R2 copy. Best-effort; offline leaves it to reconcile.
+                void releaseLocalBookSlot(bid).catch(() => {});
               }
               bumpDecks();
               load();
