@@ -677,7 +677,7 @@ export function PageViewer({ deckId }: { deckId: number }) {
 
   const addCurrent = useCallback(() => {
     Alert.prompt(
-      "しおりを追加",
+      "目次に追加",
       "名前を入力してください",
       async (text) => {
         const title = (text ?? "").trim() || `${page + 1}ページ`;
@@ -874,18 +874,18 @@ export function PageViewer({ deckId }: { deckId: number }) {
       <Modal visible={bmOpen} animationType="slide" onRequestClose={() => setBmOpen(false)}>
         <View style={styles.modal}>
           <View style={styles.modalHead}>
-            <Text style={styles.modalTitle}>目次（しおり）</Text>
+            <Text style={styles.modalTitle}>目次</Text>
             <Pressable onPress={() => setBmOpen(false)} hitSlop={10}>
               <Text style={styles.link}>閉じる</Text>
             </Pressable>
           </View>
           <Pressable style={styles.addBm} onPress={addCurrent}>
-            <Text style={styles.addBmTxt}>＋ 現在のページ（{page + 1}）をしおりに追加</Text>
+            <Text style={styles.addBmTxt}>＋ 現在のページ（{page + 1}）を目次に追加</Text>
           </Pressable>
           <FlatList
             data={bookmarks}
             keyExtractor={(b) => String(b.id)}
-            ListEmptyComponent={<Text style={styles.muted}>しおりはまだありません</Text>}
+            ListEmptyComponent={<Text style={styles.muted}>目次はまだありません</Text>}
             renderItem={({ item }) => (
               <View style={styles.bmRow}>
                 <Pressable

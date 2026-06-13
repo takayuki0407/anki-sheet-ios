@@ -362,10 +362,10 @@ function TocHint({ source, onOpen }: { source: TopicSource; onOpen: () => void }
   return (
     <Text style={styles.muted}>
       {source === "bookmarks"
-        ? "章の見出しはこの本の目次（しおり）にもとづいています。編集すると、ここにも反映されます。"
+        ? "章の見出しはこの本の目次にもとづいています。編集すると、ここにも反映されます。"
         : source === "auto"
-          ? "章の見出しは本文からの自動推定です。目次（しおり）を作ると、そちらが優先され正確になります。"
-          : "目次（しおり）を追加すると、問題を章ごとに表示できます。"}
+          ? "章の見出しは本文からの自動推定です。目次を作ると、そちらが優先され正確になります。"
+          : "目次を追加すると、問題を章ごとに表示できます。"}
       <Text style={styles.tocLink} onPress={onOpen}>
         {" "}
         目次を開く →
