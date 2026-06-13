@@ -16,6 +16,7 @@ import {
 import { useApp, type View as AppView } from "../store/session";
 import { useDetectionEngine } from "../engine/EngineProvider";
 import {
+  deleteBookQuestions,
   deleteDeck,
   firstAnswerPage,
   getDeck,
@@ -25,7 +26,7 @@ import {
 } from "../db/repo";
 import { COLOR_PRESETS, DEFAULT_MAGENTA_BAND, type DeckColorConfig } from "../types";
 import { colors } from "../ui/theme";
-import { deckBookId, uploadContent } from "../sync/deck";
+import { deckBookId, releaseLocalBookSlot, uploadContent } from "../sync/deck";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const hueDist = (a: number, b: number) => {
@@ -183,7 +184,15 @@ export function Settings({ deckId, from }: { deckId: number; from?: AppView }) {
         text: "削除",
         style: "destructive",
         onPress: async () => {
+          // Mirror the bookshelf delete: drop the AI questions/reviews and free the account slot
+          // (retain/unregister/release-holder). Deleting only the local deck would leak the
+          // account slot and leave orphaned synced questions.
+          const bid = await deckBookId(deckId);
           await deleteDeck(deckId);
+          if (bid) {
+            void deleteBookQuestions(bid).catch(() => {});
+            void releaseLocalBookSlot(bid).catch(() => {});
+          }
           setView({ name: "decks" });
         },
       },

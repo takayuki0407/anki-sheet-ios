@@ -76,6 +76,11 @@ export function flushReviewPushes(): void {
 export async function recordAnswer(q: QuestionRow, ok: boolean): Promise<ReviewRow> {
   const prev = (await getBookReviews(q.bookId)).get(q.id);
   const next = answerReview(prev, ok, Date.now());
+  // LWW monotonicity: the per-question sync keeps the record with the larger updatedAt. If this
+  // device's clock is behind the one that wrote `prev`, a fresh answer could get a SMALLER
+  // updatedAt and be silently discarded on merge — rolling back the user's latest answer. Force
+  // updatedAt strictly past prev so the newest answer always wins (dueAt/lastAt keep the real clock).
+  next.updatedAt = Math.max(next.updatedAt, (prev?.updatedAt ?? 0) + 1);
   const row: ReviewRow = { questionId: q.id, bookId: q.bookId, ...next };
   await putReview(row);
   queuePush(row);

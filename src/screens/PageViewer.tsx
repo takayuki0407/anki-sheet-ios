@@ -621,6 +621,30 @@ export function PageViewer({ deckId }: { deckId: number }) {
     back();
   }, [editMode, editDirty, discardEdits, back]);
 
+  // Any header navigation that LEAVES the viewer (問題 / ⚙) must respect unsaved mask edits — the
+  // same guard as ← 本棚, otherwise tapping them silently discards the edits.
+  const guardNav = useCallback(
+    (go: () => void) => {
+      if (editMode && editDirty) {
+        Alert.alert("編集を破棄しますか？", "保存していない編集があります。", [
+          { text: "編集に戻る", style: "cancel" },
+          {
+            text: "破棄して移動",
+            style: "destructive",
+            onPress: () => {
+              discardEdits();
+              setEditMode(false);
+              go();
+            },
+          },
+        ]);
+        return;
+      }
+      go();
+    },
+    [editMode, editDirty, discardEdits],
+  );
+
   // ---- study tracking ----
   // The viewer toggled the star locally (immediate badge) and reported the full set; mirror + persist.
   const onMaskStarred = useCallback(
@@ -738,13 +762,13 @@ export function PageViewer({ deckId }: { deckId: number }) {
           <Text style={styles.topBtn}>目次</Text>
         </Pressable>
         <Pressable
-          onPress={() => setView({ name: "quiz", deckId, from: { name: "viewer", deckId } })}
+          onPress={() => guardNav(() => setView({ name: "quiz", deckId, from: { name: "viewer", deckId } }))}
           hitSlop={10}
         >
           <Text style={styles.topBtn}>問題</Text>
         </Pressable>
         <Pressable
-          onPress={() => setView({ name: "settings", deckId, from: { name: "viewer", deckId } })}
+          onPress={() => guardNav(() => setView({ name: "settings", deckId, from: { name: "viewer", deckId } }))}
           hitSlop={10}
         >
           <Text style={styles.gearBtn}>⚙</Text>

@@ -5,8 +5,9 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useApp } from "../store/session";
-import { dueReviews, questionsByIds } from "../db/repo";
+import { allReviews, dueReviews, questionsByIds } from "../db/repo";
 import { getGenUsage } from "../ai/generate";
+import { syncReviews } from "../sync/reviews";
 import { SolveSession } from "./SolveSession";
 import type { QuestionRow } from "../db/rows";
 import { colors } from "../ui/theme";
@@ -24,6 +25,11 @@ export function Review() {
       })
       .catch(() => {}); // unknown → fall open
     void (async () => {
+      // Pull the latest cross-device review state first (Premium); a 403/offline is a no-op so the
+      // screen still works on local data. Without this, answers from another device wouldn't be
+      // reflected here until the user opened that book's individual quiz.
+      const all = await allReviews();
+      await syncReviews(new Map(all.map((r) => [r.questionId, r.bookId]))).catch(() => {});
       const due = await dueReviews(Date.now());
       const qs = await questionsByIds(due.map((r) => r.questionId));
       if (live) setQuestions(qs); // questionsByIds preserves the due order (most overdue first)

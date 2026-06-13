@@ -33,7 +33,7 @@ import {
   listBookmarks,
   setMeta,
 } from "../db/repo";
-import { deckBookId } from "../sync/deck";
+import { cachedQuota, deckBookId } from "../sync/deck";
 import { TOPICS_VERSION, extractHeadings, pageTopics, type TopicBookmark } from "../sync/topics";
 import {
   AiUnavailableError,
@@ -133,6 +133,9 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [reviews, setReviews] = useState<Map<string, ReviewRow>>(new Map());
   const [usage, setUsage] = useState<GenUsage | null>(null);
+  // Last-seen tier as an offline fallback: getGenUsage fails offline, and without this a paid
+  // Premium user would lose 今日の復習 whenever the network is down.
+  const [cachedTier, setCachedTier] = useState<string | null>(null);
   const [tab, setTab] = useState<"solve" | "list" | "generate">("solve");
   const [pendingSession, setPendingSession] = useState<QuestionRow[] | null>(null);
 
@@ -145,6 +148,11 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
   }, [bookId]);
   const refreshUsage = useCallback(() => {
     void getGenUsage().then(setUsage).catch(() => {});
+  }, []);
+
+  // Seed the offline-fallback tier from the last-seen server quota cache (set by listBooks).
+  useEffect(() => {
+    void cachedQuota().then((q) => q?.tier && setCachedTier(q.tier));
   }, []);
 
   useEffect(() => {
@@ -183,7 +191,9 @@ export function Quiz({ deckId, from }: { deckId: number; from?: AppView }) {
     };
   }, [deckId, user, reloadQuestions, refreshUsage]);
 
-  const premium = usage?.tier === "premium" || usage?.tier === "admin";
+  // Prefer the live server tier; fall back to the last-seen tier when offline (usage===null).
+  const effTier = usage?.tier ?? cachedTier;
+  const premium = effTier === "premium" || effTier === "admin";
 
   // Topic labels for pages that have questions ("P.14" alone doesn't tell the user which chapter
   // it is). The deck's real 目次 (bookmarks) wins; otherwise a TOC is auto-detected from the whole

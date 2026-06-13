@@ -26,6 +26,7 @@ import {
   listBooks,
   putContent,
   registerBook,
+  retainBook,
   unregisterBook,
   updateBookMeta,
   type AccountBook,
@@ -48,15 +49,19 @@ export interface QuotaCache {
   count: number;
   limit: number;
   unlimited: boolean;
+  /** Last-seen server tier — lets Premium-gated features (今日の復習) stay available offline, where
+   * a fresh listBooks fails and there's no other tier source. */
+  tier?: string;
 }
 export async function cacheQuota(b: {
   count: number;
   limit: number;
   unlimited: boolean;
+  tier?: string;
 }): Promise<void> {
   await setMeta(
     "quotaCache",
-    JSON.stringify({ count: b.count, limit: b.limit, unlimited: b.unlimited }),
+    JSON.stringify({ count: b.count, limit: b.limit, unlimited: b.unlimited, tier: b.tier }),
   ).catch(() => {});
 }
 /** The last-seen server quota (or null if we've never synced on this device). */
@@ -120,6 +125,31 @@ export async function localBookIds(): Promise<Map<string, number>> {
     if (bid) m.set(bid, d.id);
   }
   return m;
+}
+
+/** Account-side cleanup when a single book is deleted locally (from anywhere — the bookshelf or the
+ * book's settings). Fetches the account view itself, so callers without the bookshelf's cached cloud
+ * state can free the slot correctly: no cloud copy → unregister (permanent, frees the slot); a
+ * Standard/Free cloud-backed book → retain (frees the slot, keeps R2 for re-Pro); a Pro+ holder →
+ * keep the book active (re-downloadable) and just release the holder. Best-effort; offline leaves
+ * the slot to be reconciled later (never throws). */
+export async function releaseLocalBookSlot(bookId: string): Promise<void> {
+  if (!(await idToken())) return;
+  let acct;
+  try {
+    acct = await listBooks();
+  } catch {
+    return; // offline — keep the registry as-is; reconcile/next sync handles it
+  }
+  const b = acct.books.find((x) => x.book_id === bookId);
+  if (!b) return; // never registered (fail-open import) → no account slot to free
+  if (b.size === 0) {
+    await unregisterBook(bookId).catch(() => {}); // no cloud copy → free the slot (permanent)
+  } else if (!acct.unlimited) {
+    await retainBook(bookId).catch(() => {}); // Standard/Free → retain (free slot, keep R2)
+  } else if (b.device === deviceLabel()) {
+    await updateBookMeta(bookId, { device: null }).catch(() => {}); // Pro+ holder → release holder
+  }
 }
 
 /** On logout, release THIS device's book slots that have NO cloud file (size 0 = a Standard

@@ -221,6 +221,10 @@ export function DeckList() {
     } catch {
       setCloud([]); // signed out / offline — no cloud section
       setCloudPro(false);
+      // Offline: fall back to the last-seen server tier so a Premium user keeps 今日の復習
+      // (the card gates on `tier`; null would hide a paid feature whenever the network is down).
+      const q = await cachedQuota();
+      if (q?.tier) setTier(q.tier);
     }
   }, [load]);
 
