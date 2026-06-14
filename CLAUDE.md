@@ -45,7 +45,7 @@
 
 セキュリティ・ハードニング・バックログ（2026-06-13 監査、**Critical/High なし**。詳細は `docs/research/security-audit.md`）：
 
-- [ ] **E (Low)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：`allowUniversalAccessFromFileURLs` 除去・`originWhitelist` 限定・`onShouldStartLoadWithRequest` 追加・onMessage で `nativeEvent.url` 検証。
+- [ ] **E (Low・部分実装済 2026-06-14 `56882e1`)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：✅`onShouldStartLoadWithRequest`(file://以外の遷移ブロック)・✅onMessage で `nativeEvent.url` 検証・✅`originWhitelist`→`["file://*"]`。⏸️`allowUniversalAccessFromFileURLs` は engine が別dirのステージPDFを XHR するため必須＝据え置き（除去は同一オリジン配置への改修前提）。**要実機検証（1.0.2 同梱・取り込み/閲覧の回帰確認）**。
 - [ ] **B (Low)** `src/iap/entitlements.ts:33` が pro へフェイルオープン（サーバー強制済＝影響はローカルUIのみ）。
 - [ ] **D (任意・見送り推奨)** 証明書ピンニング（運用リスク＞便益）。
 - [ ] Firebase Web API キーを GCP コンソールで制限（App=iOSバンドルID／API=Identity Toolkit のみ）。

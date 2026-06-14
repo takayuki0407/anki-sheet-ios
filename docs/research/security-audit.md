@@ -57,6 +57,7 @@
 - WebViewは2インスタンスのみ：`EngineWebView.tsx:174`／`ViewerWebView.tsx:222`の`onMessage`。RN→WebViewは`injectJavaScript`（二重`JSON.stringify`でエスケープ）。
 - in-page側`engine-src/src/bridge.ts`：受信はホスト注入関数`window.ankiEngine.dispatch`のみ（`window 'message'`イベント未使用→iframe注入経路なし）、送信は`ReactNativeWebView.postMessage`。**安全**。
 - **⚠ onMessageが送信元オリジン（`nativeEvent.url`）未検証＋`onShouldStartLoadWithRequest`無し＋`originWhitelist:["*"]`**（=Finding E）。現状は信頼済ローカルエンジン＋JS非実行PDFのみで実exploitなし（Low）。修正：`onShouldStartLoadWithRequest`でengine file://オリジン以外への遷移をブロック＋`nativeEvent.url`検証＋`allowUniversalAccessFromFileURLs`除去。
+- **2026-06-14 部分実装（`56882e1`）**：両 WebView に `onShouldStartLoadWithRequest`(file://以外の遷移ブロック)＋`onMessage` の `nativeEvent.url` 検証＋`originWhitelist`→`["file://*"]` を追加。**`allowUniversalAccessFromFileURLs` は据え置き**：engine(`<documents>/engine/`)が別dirの `<documents>/` ステージPDFを XHR するため必須（除去は PDF 同一オリジン配置への改修が前提）。engine 中核ゆえ**要実機検証（次 1.0.2 ビルド）**。
 
 ## 依存・シークレットスキャン（2026-06-13）
 
