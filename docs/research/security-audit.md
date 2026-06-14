@@ -13,7 +13,7 @@
 |---|---|---|---|---|
 | A | Medium※ | Firebaseセッション（長命リフレッシュトークン）がAsyncStorage平文 | `src/auth/firebase.ts:31` | ✅**実装済(2026-06-14)** SecureStore/Keychainアダプタ `src/auth/secureStorage.ts`（要実機検証） |
 | E | Low | WebView権限過剰＋メッセージオリジン未検証 | `src/engine/{Engine,Viewer}WebView.tsx` | 下記「WebView」節 |
-| B | Low | clientがproへfail-open | `src/iap/entitlements.ts:33` | ローカル専用Premium UIを起動時サーバーtierでゲート |
+| B | Low | clientがproへfail-open | `src/iap/entitlements.ts:33` | ✅**許容(2026-06-14・変更なし)** 本番到達不可（`purchases.ts` が configured build で fail-closed）＋サーバー強制（下記注） |
 | F | Low | プロンプト注入の追加緩和 | `../_ref-anki-sheet/functions/api/sync/generate.ts` | ✅**実装済(2026-06-14・web `6ba20b3`)** UNTRUSTED_DATA_RULE＋`===`デリミタ（本番デプロイで有効化） |
 | C | Info | webhook secret非定数時間比較 | `../_ref-anki-sheet/functions/api/webhook/revenuecat.ts:78` | ✅**実装済(2026-06-14・web `f3a4b19`)** double-HMAC定数時間比較（本番デプロイで有効化） |
 | D | 任意 | 証明書ピンニング無し | — | 脅威モデル上**非実装が妥当** |
@@ -25,7 +25,7 @@
 ## 5観点サマリ
 
 - **認証・セッション**：JWT検証堅牢（`functions/_lib/auth.ts`：RS256固定・alg混同/none拒否・`email_verified`でadmin詐称防止）。`/api/sync/*`は全ルート401ゲート。→ Finding A（トークン保管）。
-- **課金・サブスク**：RevenueCatがStoreKitレシートをサーバー検証→webhook（secret認証）→D1 `users.tier`。クライアントのRC状態は非信用。`/dev/tier`はadminのみ。→ Finding B/C。
+- **課金・サブスク**：RevenueCatがStoreKitレシートをサーバー検証→webhook（secret認証）→D1 `users.tier`。クライアントのRC状態は非信用。`/dev/tier`はadminのみ。→ Finding B/C。**B=許容（fail-open は本番到達不可＝`purchases.ts` が configured build で fail-closed・`purchases.ts:80`／2026-06-14）・C=実装済（double-HMAC 定数時間比較・web `f3a4b19`）。**
 - **API・通信**：Anthropicキーは完全サーバー側。HTTPS強制（ATS例外なし・平文URLなし）。→ Finding D（任意）。
 - **データ同期**：全D1/R2が`ctx.data.uid`スコープ、R2キーは`${uid}/...`名前空間。IDORなし。書込(PUT)はPro強制。
 - **入力・出力**：SQLi無し（全パラメータbind、`${}`はカラム名ホワイトリスト/プレースホルダのみ）。XSS実害なし（後述WebView）。→ Finding E/F。

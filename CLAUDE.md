@@ -46,7 +46,6 @@
 セキュリティ・ハードニング・バックログ（2026-06-13 監査、**Critical/High なし**。詳細は `docs/research/security-audit.md`）：
 
 - [ ] **E (Low・部分実装済 2026-06-14 `56882e1`)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：✅`onShouldStartLoadWithRequest`(file://以外の遷移ブロック)・✅onMessage で `nativeEvent.url` 検証・✅`originWhitelist`→`["file://*"]`。⏸️`allowUniversalAccessFromFileURLs` は engine が別dirのステージPDFを XHR するため必須＝据え置き（除去は同一オリジン配置への改修前提）。**要実機検証（1.0.2 同梱・取り込み/閲覧の回帰確認）**。
-- [ ] **B (Low)** `src/iap/entitlements.ts:33` が pro へフェイルオープン（サーバー強制済＝影響はローカルUIのみ）。
 - [ ] **D (任意・見送り推奨)** 証明書ピンニング（運用リスク＞便益）。
 - [ ] Firebase Web API キーを GCP コンソールで制限（App=iOSバンドルID／API=Identity Toolkit のみ）。
 - [ ] 「今日の復習」はクライアントのみゲート（Low・ローカル限定機能ゆえの設計・**許容推奨**）。
@@ -62,6 +61,7 @@
 - [x] **ドキュメント正本化**：セキュリティ監査を `docs/research/` の実ファイルに集約、CLAUDE.md を実パス参照に統一（Claudeメモリ参照のデッドリンク解消）、Windows絶対パスを相対化、メモリはポインタ化（2026-06-14）。
 - [x] **セキュリティ A（最優先ハードニング）実装（2026-06-14）**：Firebase セッション永続化を AsyncStorage平文 → **SecureStore/Keychain アダプタ**（新設 `src/auth/secureStorage.ts`、`firebase.ts:31` 差し替え、`expo-secure-store ~15.0.8`＋app.json plugin）。キーサニタイズ＋値640字チャンク分割＋旧セッション1回移行→平文消去。`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`（iCloud/暗号化バックアップ除外）。`tsc` 通過。**Build 9(1.0.1) に同梱 → TestFlight 実機検証完了（#1旧セッション移行／#2再起動でログイン維持／#3サインアウトでKeychain消去＝全合格・2026-06-14）。1.0.0 承認後に 1.0.1 提出可**。
 - [x] **セキュリティ F・C 実装（2026-06-14）**：F＝AI生成プロンプトに未信頼データ宣言＋`generate.ts` の `===` デリミタ（web `6ba20b3`）／C＝webhook secret を double-HMAC 定数時間比較（`revenuecat.ts`・web `f3a4b19`）。`tsc -p tsconfig.json` 通過。**本番 Pages デプロイで有効化**（#11/#17 と同梱）。
+- [x] **セキュリティ B（fail-open）＝許容（コード変更なし・2026-06-14）**：`effectiveTier`(`entitlements.ts:33`) の pro fail-open は **本番到達不可**＝`purchases.ts` が configured build で fail-closed（初回fetch失敗時 billingActive=true・tier=free でロック・`purchases.ts:80`）。`billingActive=false` は placeholder鍵/Expo Go 限定（dev用）。effectiveTier はローカルUI専用でサーバーが実cap強制。D・「今日の復習」と同じ許容。
 
 ---
 
