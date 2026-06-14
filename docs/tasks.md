@@ -6,9 +6,9 @@
 
 ## 🔥 次のセッションで着手（優先順）
 
-- [ ] **web 本番デプロイ（最優先・未完）**：F/C＋#11/#17＋法務文言を反映。**※ `npm run build`＋`npx wrangler pages deploy dist --project-name=anki-sheet` は web リポジトリ `../_ref-anki-sheet` で実行**（前回 iOS repo で叩き "Missing script: build"）。後に RC webhook 200／AI生成 をスポットチェック。
-- [ ] **1.0.1 提出**：1.0.0（Build 4）承認後、Build 9（1.0.1・監査+A・TF検証済）を `eas submit`（手順は HANDOFF.md）。
-- [ ] **監査 E 実機検証（1.0.2）**：WebViewハードニング（`56882e1`）を次 iOS ビルドに同梱→取り込み/閲覧の回帰確認。OKなら universal-access 除去（同一オリジン配置改修）も検討。
+- [x] **web 本番デプロイ（完了 2026-06-14・production）**：F/C＋#11/#17＋法務文言を本番反映。`../_ref-anki-sheet` で `npm run build`＋`npx wrangler pages deploy dist --project-name=anki-sheet`。スポットチェック通過（health200/sync401/webhook未署名401/sample.pdf200/法務200/ComingSoonハッシュ一致）。**残＝RC実署名webhook200/AI生成のアプリ側確認**。
+- [ ] **1.0.1 提出（1.0.0 審査待ち＝ブロック中）**：1.0.0（Build 4）承認後、Build 9（1.0.1・監査+A・TF検証済・ASCアップ済）を ASC で版作成→Build 9選択→審査提出（バイナリはTFにあり再 eas submit 不要）。
+- [ ] **監査 E 実機検証（1.0.2）**：app.json を 1.0.2 にバンプ済（`fde9d46`・未push）。次 `eas build` で焼成→取り込み/閲覧の回帰確認。コードは両WebView検証済（nav guard＋onMessage origin＋originWhitelist=file://*）。OKなら universal-access 除去（同一オリジン配置改修）も検討。
 
 ---
 
