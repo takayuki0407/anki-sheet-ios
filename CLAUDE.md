@@ -45,7 +45,7 @@
 
 セキュリティ・ハードニング・バックログ（2026-06-13 監査、**Critical/High なし**。詳細は `docs/research/security-audit.md`）：
 
-- [ ] **E (Low・部分実装済 2026-06-14 `56882e1`)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：✅`onShouldStartLoadWithRequest`(file://以外の遷移ブロック)・✅onMessage で `nativeEvent.url` 検証・✅`originWhitelist`→`["file://*"]`。⏸️`allowUniversalAccessFromFileURLs` は engine が別dirのステージPDFを XHR するため必須＝据え置き（除去は同一オリジン配置への改修前提）。**要実機検証（1.0.2 同梱・取り込み/閲覧の回帰確認）。app.json を 1.0.2 にバンプ済（`fde9d46`・未push）→ 次 `eas build` で焼成して実機検証**。
+- [ ] **E (Low・部分実装済 2026-06-14 `56882e1`)** WebViewハードニング — `src/engine/{Engine,Viewer}WebView.tsx`：✅`onShouldStartLoadWithRequest`(file://以外の遷移ブロック)・✅onMessage で `nativeEvent.url` 検証・✅`originWhitelist`→`["file://*"]`。⏸️`allowUniversalAccessFromFileURLs` は engine が別dirのステージPDFを XHR するため必須＝据え置き（除去は同一オリジン配置への改修前提）。**要実機検証（1.0.2 同梱・取り込み/閲覧の回帰確認）。app.json を 1.0.2 にバンプ済（`fde9d46`・push済）→ 次 `eas build` で焼成して実機検証**。
 - [ ] **D (任意・見送り推奨)** 証明書ピンニング（運用リスク＞便益）。
 - [ ] Firebase Web API キーを GCP コンソールで制限（App=iOSバンドルID／API=Identity Toolkit のみ）。
 - [ ] 「今日の復習」はクライアントのみゲート（Low・ローカル限定機能ゆえの設計・**許容推奨**）。
@@ -82,7 +82,7 @@
 
 1. ✅**web 本番デプロイ（完了 2026-06-14・production）**：F/C＋#11/#17＋法務文言を本番反映。`../_ref-anki-sheet` で `npm run build`＋`npx wrangler pages deploy dist --project-name=anki-sheet`。スポットチェック通過（health200/sync401/webhook未署名401/sample.pdf200/法務200/ComingSoonハッシュ一致）。**残＝RC実署名webhook200／AI生成のアプリ側確認（外部からは検証不可）**。
 2. **1.0.1 提出（1.0.0 審査待ち＝ブロック中）**：1.0.0（Build 4）承認後、Build 9（1.0.1・監査+A・TF検証済・ASCアップ済）を ASC で版作成→Build 9選択→審査提出（バイナリはTFにあり再 eas submit 不要・手順は HANDOFF.md）。
-3. **監査 E 実機検証（1.0.2）**：app.json を 1.0.2 にバンプ済（`fde9d46`・未push）。次 `eas build` で焼成→取り込み/閲覧の回帰確認。コードは両WebView検証済。OKなら universal-access 除去（同一オリジン配置改修）も検討。
+3. **監査 E 実機検証（1.0.2）**：app.json を 1.0.2 にバンプ済（`fde9d46`・push済）。次 `eas build` で焼成→取り込み/閲覧の回帰確認。コードは両WebView検証済。OKなら universal-access 除去（同一オリジン配置改修）も検討。
 4. Android トラック：Play登録・Google Sign-In・RevenueCat Android・ストア素材。
 
 ---
@@ -92,3 +92,4 @@
 - **2026-06-13〜14**：ローンチ前監査19件修正・Build 8投入。セキュリティ審査（5観点・プロンプト注入・プラン強制・WebViewオリジン・トークン保管）実施＝Crit/High なし→バックログ A–F 化。依存/シークレットスキャン（npm audit / gitleaks / depcheck）。セッション管理ファイル（CLAUDE.md / tasks.md / `/checkpoint` / `/wrap-up`）整備。終盤に **AGENTS.md を v54 に修正**・監査を `docs/research/` へ正本化・メモリをポインタ化。
 - **2026-06-14（本セッション）**：6/14文書を git 正本化（`d415a6d`）。**セキュリティ A 実装**＝Firebaseセッションを SecureStore/Keychain アダプタ化（`src/auth/secureStorage.ts` 新設・`firebase.ts` 差し替え・`expo-secure-store ~15.0.8`＋app.json plugin）、`tsc`＋チャンクロジック検証9/9・要実機検証（`47b4450`）。監査正本／CLAUDE.md／tasks を更新、`../HANDOFF.md` を現状（iOS HEAD・未push8件・A状況）へ同期。iOS main は origin より **8コミット先行＝未push**。
 - **2026-06-14（夕）**：A 実機検証完了（TF #1-3合格）→ **1.0.1=Build 9（監査+A・Option1）を EAS ビルド＋TF提出**。監査 Low 一巡＝**F**(プロンプト注入・web `6ba20b3`)・**C**(webhook定数時間・web `f3a4b19`)実装、**E**(WebViewハードニング・部分・iOS `56882e1`・要実機検証1.0.2)、**B**(fail-open)は本番到達不可で許容。iOS/web 両 repo push 済み・**web デプロイは次回**（`../_ref-anki-sheet` で実行）。
+- **2026-06-14（夜・短）**：前回編集済みのドキュメント（web本番デプロイ完了・1.0.1ブロック中・監査E状態）を `8ffbee8` でコミット＋push。**iOS main は origin/main と完全同期＝未pushゼロ**（履歴の「未push8件」は古い記述・実 push は `fde9d46..8ffbee8` の2件のみだった）。コード変更なし。
