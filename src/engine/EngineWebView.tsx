@@ -109,6 +109,8 @@ export const EngineWebView = forwardRef<EngineHandle, Props>(function EngineWebV
 
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
+      // Defense in depth: only trust messages from the local engine's file:// origin.
+      if (!e.nativeEvent.url.startsWith("file://")) return;
       let m: { type?: string; reqId?: string; [k: string]: unknown };
       try {
         m = JSON.parse(e.nativeEvent.data);
@@ -163,12 +165,20 @@ export const EngineWebView = forwardRef<EngineHandle, Props>(function EngineWebV
       <WebView
         ref={webRef}
         source={{ uri: engineUri }}
-        originWhitelist={["*"]}
+        originWhitelist={["file://*"]}
+        // The engine is a local, trusted bundle that never navigates off its file:// origin. Block
+        // any non-file:// navigation (e.g. a link smuggled into a PDF) so it can't reach the network.
+        // pdf.js's PDF read is a subresource XHR, not a navigation, so it does NOT pass through here.
+        onShouldStartLoadWithRequest={(req) => req.url.startsWith("file://")}
         javaScriptEnabled
         domStorageEnabled
         // iOS: let the file:// engine read sibling assets (cMaps, worker) and staged PDFs.
         allowFileAccess
         allowFileAccessFromFileURLs
+        // Required: the engine (<documents>/engine/) XHRs staged PDFs in <documents>/ — a different
+        // file:// directory ⇒ cross-origin, needing universal access. Removing it breaks PDF loading
+        // unless PDFs are staged same-origin. Mitigated by the file://-only nav guard + onMessage
+        // origin check above; the engine loads only local, trusted content.
         allowUniversalAccessFromFileURLs
         allowingReadAccessToURL={documentDirUri()}
         onMessage={onMessage}
